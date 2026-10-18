@@ -1,0 +1,15 @@
+# Saídas de trabalho (folhas de análise, cópias de clipes, planos de corte)
+analise/
+*.jpg
+plano*.json
+_projeto-anterior.json
+_ultimo.json
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Sistema
+Thumbs.db
+desktop.ini
+.DS_Store
