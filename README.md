@@ -32,7 +32,7 @@ Nos dois: 9:16 em 1080x1920, 30 fps, sem som, headline fixa em branco com contor
 Copie a pasta da skill para as suas skills do Claude Code:
 
 ```bash
-git clone https://github.com/<seu-usuario>/capcut-tiktok-shop-skill.git
+git clone https://github.com/Gloen-Carlos/capcut-tiktok-shop-skill.git
 cp -r capcut-tiktok-shop-skill/skills/video-tiktok-shop ~/.claude/skills/
 ```
 
