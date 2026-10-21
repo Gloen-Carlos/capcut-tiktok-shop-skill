@@ -24,11 +24,14 @@
 // Não altera projetos de outra origem nem o índice do CapCut.
 // O projeto precisa estar fechado no CapCut na hora de gerar.
 //
-// SO: só Windows. O caminho padrão dos rascunhos é o do Windows (ajustável por "capcutUserData"
-// ou "draftsRoot" no plano), a limpeza chama o lixeira.mjs, que é de Windows, e a checagem de
-// "projeto aberto no CapCut" abaixo depende de o Windows travar arquivos abertos: no macOS o
-// rename de um arquivo em uso funciona, a checagem passa sempre e a montagem nova pode ser
-// gravada por cima sem aviso. Ver "Mac: ainda não" no README antes de rodar fora do Windows.
+// SO: Windows e macOS. O que muda entre os dois:
+//   - caminho padrão da pasta do CapCut: AppData/Local no Windows, ~/Movies no macOS
+//     (sempre ajustável por "capcutUserData" ou "draftsRoot" no plano);
+//   - checagem de "projeto aberto no CapCut": rename do clipe em uso no Windows, lsof + processo
+//     do CapCut no macOS (ver o bloco adiante);
+//   - limpeza: o lixeira.mjs usa a Lixeira de cada sistema.
+// Em outro sistema o script para e pede "capcutUserData"/"draftsRoot" no plano.
+// O lado macOS foi escrito sem Mac para testar; ver a lista de conferência no README.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -45,9 +48,42 @@ if (!planPath) {
 }
 const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
 const fps = plan.fps || 30;
+const WINDOWS = process.platform === "win32";
+
+// Pasta "User Data" do CapCut. O padrão do macOS (~/Movies) vem de blogs, não da documentação
+// da CapCut, então quando a pasta não existe o script para e diz onde achar o caminho certo,
+// em vez de sair tentando outros lugares ou criar um projeto que o CapCut nunca vai listar.
+const PADRAO_USER_DATA = {
+  win32: "AppData/Local/CapCut/User Data",
+  darwin: "Movies/CapCut/User Data",
+}[process.platform];
+const comoApontar =
+  'Informe no plano "capcutUserData": "<.../CapCut/User Data>" ou "draftsRoot": ' +
+  '"<.../CapCut/User Data/Projects/com.lveditor.draft>".';
+// Só "draftsRoot" no plano: a pasta do CapCut é a de dois níveis acima, que é como o próprio
+// CapCut monta esse caminho. É ela que resolve o {{CAPCUT_USER_DATA}} do molde.
 const capcutUserData =
-  plan.capcutUserData || path.join(os.homedir(), "AppData/Local/CapCut/User Data");
+  plan.capcutUserData ||
+  (plan.draftsRoot
+    ? path.dirname(path.dirname(path.resolve(plan.draftsRoot)))
+    : PADRAO_USER_DATA
+      ? path.join(os.homedir(), PADRAO_USER_DATA)
+      : null);
+if (!capcutUserData) {
+  console.error(
+    "Sistema " + process.platform + ": não tenho caminho padrão da pasta do CapCut. " + comoApontar,
+  );
+  process.exit(1);
+}
 const draftsRoot = plan.draftsRoot || path.join(capcutUserData, "Projects/com.lveditor.draft");
+if (!fs.existsSync(draftsRoot)) {
+  console.error(
+    "Pasta de rascunhos do CapCut não encontrada: " + draftsRoot + "\n" +
+      "Onde ver o caminho certo: nas Configurações do CapCut (pasta dos rascunhos), ou no painel " +
+      "Detalhes de um projeto aberto. " + comoApontar,
+  );
+  process.exit(1);
+}
 // Molde: por padrão a cópia congelada que vem com a skill (assets/molde). Um projeto vivo do
 // CapCut muda quando o usuário edita e já quebrou a geração uma vez; só use "template" de propósito.
 const skillDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -65,30 +101,102 @@ if (reuse && !fs.existsSync(marker)) {
   process.exit(1);
 }
 // Projeto aberto no CapCut: ele mantém a versão antiga na memória e grava por cima do que for
-// gerado aqui (aconteceu em 12/10). Sinal usado: algum clipe do projeto atual está em uso.
-if (reuse && !process.argv.includes("--forcar")) {
-  let busy = "";
+// gerado aqui (aconteceu em 12/10). O sinal muda de sistema, mas o modo de falhar é o mesmo:
+// na dúvida, parar sem alterar nada. "--forcar" passa por cima.
+//   Windows  o arquivo aberto fica travado, então renomear um clipe do projeto atual falha.
+//   macOS    renomear arquivo em uso funciona e essa checagem passaria sempre. Aqui o sinal é
+//            o lsof em cada clipe do projeto atual. Se o lsof não acusar nada mas o CapCut
+//            estiver rodando, não há como saber daqui se ele está na tela inicial ou com o
+//            projeto aberto: o script para e pede essa confirmação.
+const clipesDoProjeto = () => {
   try {
     const current = JSON.parse(fs.readFileSync(path.join(outDir, "draft_content.json"), "utf8"));
-    for (const file of new Set(current.materials.videos.map((video) => video.path))) {
-      if (!fs.existsSync(file)) continue;
-      try {
-        fs.renameSync(file, file + ".chk");
-        fs.renameSync(file + ".chk", file);
-      } catch {
-        busy = file;
+    return [...new Set(current.materials.videos.map((video) => video.path))].filter(
+      (file) => file && fs.existsSync(file),
+    );
+  } catch {
+    return []; // sem conteúdo legível: nada a checar
+  }
+};
+const emUsoWindows = (files) => {
+  for (const file of files) {
+    try {
+      fs.renameSync(file, file + ".chk");
+      fs.renameSync(file + ".chk", file);
+    } catch {
+      return file;
+    }
+  }
+  return "";
+};
+// Roda um utilitário e devolve a saída. ok: false só quando o programa não existe — sair com
+// código diferente de zero ainda é resposta (o lsof sai 1 quando ninguém abriu o arquivo).
+const correr = (cmd, args) => {
+  try {
+    return { ok: true, saida: execFileSync(cmd, args, { stdio: ["ignore", "pipe", "ignore"] }).toString() };
+  } catch (error) {
+    if (typeof error.status === "number") return { ok: true, saida: String(error.stdout || "") };
+    return { ok: false, saida: "" };
+  }
+};
+// Devolve { arquivo } com o clipe em uso (string vazia = nenhum), ou null quando não há lsof
+// para responder. No macOS o lsof fica em /usr/sbin, que nem sempre está no PATH do node.
+const emUsoUnix = (files) => {
+  if (!files.length) return { arquivo: "" };
+  for (const lsof of ["lsof", "/usr/sbin/lsof"]) {
+    let respondeu = false;
+    for (const file of files) {
+      const resultado = correr(lsof, ["-t", file]);
+      if (!resultado.ok) {
+        respondeu = false;
         break;
       }
+      respondeu = true;
+      if (resultado.saida.trim()) return { arquivo: file };
     }
-  } catch {
-    busy = "";
+    if (respondeu) return { arquivo: "" };
   }
-  if (busy) {
-    console.error(
-      "PROJETO ABERTO NO CAPCUT: o clipe \"" + path.basename(busy) + "\" está em uso. " +
-        "Peça para ele voltar à tela inicial do CapCut e gere de novo. Nada foi alterado.",
+  return null;
+};
+// true/false, ou null quando não há pgrep para responder.
+const capcutRodando = () => {
+  for (const args of [["-i", "-x", "CapCut"], ["-i", "-f", "CapCut.app"]]) {
+    const resultado = correr("pgrep", args);
+    if (!resultado.ok) return null;
+    if (resultado.saida.trim()) return true;
+  }
+  return false;
+};
+const avisarEParar = (mensagem) => {
+  console.error(mensagem + " Nada foi alterado.");
+  process.exit(2);
+};
+if (reuse && !process.argv.includes("--forcar")) {
+  const files = clipesDoProjeto();
+  const emUso = WINDOWS ? { arquivo: emUsoWindows(files) } : emUsoUnix(files);
+  if (emUso && emUso.arquivo) {
+    avisarEParar(
+      "PROJETO ABERTO NO CAPCUT: o clipe \"" + path.basename(emUso.arquivo) + "\" está em uso. " +
+        "Peça para ele voltar à tela inicial do CapCut e gere de novo.",
     );
-    process.exit(2);
+  }
+  if (!WINDOWS) {
+    const rodando = capcutRodando();
+    if (rodando === true) {
+      avisarEParar(
+        "CAPCUT ABERTO: nenhum clipe do projeto aparece em uso, mas o CapCut está rodando e daqui " +
+          "não dá para saber se o projeto está aberto. O caminho limpo é pedir para ele fechar o " +
+          "CapCut e gerar de novo; se ele preferir só voltar à tela inicial, peça essa " +
+          "confirmação e rode de novo com --forcar.",
+      );
+    }
+    if (!emUso || rodando === null) {
+      avisarEParar(
+        "SEM COMO CHECAR O CAPCUT: faltam lsof e/ou pgrep neste sistema, então não sei dizer se o " +
+          "projeto está aberto. Peça para ele confirmar que o CapCut está na tela inicial e gere " +
+          "de novo com --forcar.",
+      );
+    }
   }
 }
 let existingMeta = null;

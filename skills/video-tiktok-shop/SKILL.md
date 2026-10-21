@@ -21,7 +21,16 @@ Esta skill grava em duas pastas:
 
 Precisa de `ffmpeg`, `ffprobe` e `node` no PATH, e do CapCut desktop instalado.
 
-**Só Windows por enquanto.** Adaptar para macOS está pendente, e o pendente não é só trocar caminhos: a limpeza usa o PowerShell, e a trava que impede o CapCut de gravar por cima da montagem depende de o Windows travar arquivos abertos — no Mac ela passa sempre e a montagem nova pode ser perdida sem aviso. Se o usuário estiver num Mac, diga isso antes de montar nada, em vez de tentar e falhar no meio. O README do repositório tem a lista do que falta.
+**Windows e macOS.** Os scripts escolhem o caminho pelo sistema: pasta dos rascunhos do CapCut (`AppData/Local` ou `~/Movies`), Lixeira (PowerShell ou Finder) e a checagem de "projeto aberto no CapCut" (rename do clipe travado, ou `lsof` mais o processo do CapCut).
+
+**O lado macOS nunca rodou num Mac.** Foi escrito numa máquina Windows. Se o usuário estiver num Mac, diga isso antes de montar a primeira sequência, peça para ele conferir o resultado no CapCut e avise que:
+
+- o macOS vai pedir permissão para controlar o Finder na primeira limpeza; sem ela nada é apagado e o `lixeira.mjs` devolve `ok: false`;
+- com o CapCut aberto o gerador pode abortar com "CAPCUT ABERTO" mesmo que o projeto esteja fechado, porque lá não dá para distinguir as duas coisas. Nesse caso peça para ele fechar o CapCut; se ele confirmar que está na tela inicial, rode de novo com `--forcar`;
+- se a pasta de rascunhos não for encontrada, o gerador para e pede o caminho: peça para ele ver em Configurações do CapCut, ou no painel Detalhes de um projeto aberto, e passe `"capcutUserData"` no plano;
+- a headline pode sair em outra fonte, porque o molde aponta para o cache de fontes de uma instalação Windows do CapCut.
+
+A seção "macOS: escrito, mas não testado" do README do repositório tem a lista completa do que conferir.
 
 ## Fluxo de uma sessão
 
@@ -116,7 +125,7 @@ node "<pasta-desta-skill>/scripts/capcut-draft.mjs" "<scratchpad>/plano.json"
 - `start` e `frames` são frames do arquivo de origem (os que o script de análise mostra). `rate` é a aceleração, só na entrada e na saída.
 - **Um projeto só, chamado "TikTok Shop".** Ele pediu para não criar um projeto novo a cada vídeo. O script reaproveita esse projeto e substitui o conteúdo dele pela sequência atual, guardando uma única cópia do conteúdo anterior em `<pasta acima do mediaDir>/_projeto-anterior.json`, sobrescrita a cada geração. Por isso:
   - Antes de gerar a próxima sequência, confirme que ele já exportou a anterior (o "próximo" dele vale como confirmação).
-  - O projeto precisa estar fechado no CapCut na hora de gerar (CapCut na tela inicial). Com ele aberto, o CapCut grava a versão antiga por cima e a montagem nova some. O script aborta com "PROJETO ABERTO NO CAPCUT" quando percebe isso; nesse caso peça para ele voltar à tela inicial e gere de novo. Confira `gravacaoConfirmada: true` na saída.
+  - O projeto precisa estar fechado no CapCut na hora de gerar (CapCut na tela inicial). Com ele aberto, o CapCut grava a versão antiga por cima e a montagem nova some. O script aborta com "PROJETO ABERTO NO CAPCUT" quando percebe isso; nesse caso peça para ele voltar à tela inicial e gere de novo. No Mac ele também pode abortar com "CAPCUT ABERTO" ou "SEM COMO CHECAR O CAPCUT" — veja "Antes da primeira sessão". Confira `gravacaoConfirmada: true` na saída.
   - Se ele disser que a sequência não apareceu, veja se o `draft_content.json` do projeto voltou ao conteúdo antigo e rode o gerador de novo com o mesmo plano.
   - O script só substitui projetos que ele mesmo criou (marcados com `gerado_por_claude.txt`) e se recusa a tocar em qualquer outro.
 - **Taxa:** o projeto sai em 30 fps. Não mude sem ele pedir.
@@ -141,7 +150,7 @@ Ele pediu para não encher o disco: depois que uma sequência é concluída e el
   ```
 
 - **A sequência atual fica** até a próxima geração, porque o projeto do CapCut depende dos clipes dela até ele exportar.
-- Tudo vai para a Lixeira do Windows, nada é apagado de forma definitiva. O espaço só é liberado quando ele esvazia a Lixeira; diga isso se ele perguntar por espaço em disco. O `lixeira.mjs` recusa qualquer caminho fora da pasta de trabalho (`$TIKTOK_SHOP_WORKDIR`) e da pasta temporária do Claude; não contorne essa trava com `rm`.
+- Tudo vai para a Lixeira do Windows ou para o Lixo do macOS, nada é apagado de forma definitiva. O espaço só é liberado quando ele esvazia a Lixeira; diga isso se ele perguntar por espaço em disco. O `lixeira.mjs` recusa qualquer caminho fora da pasta de trabalho (`$TIKTOK_SHOP_WORKDIR`) e da pasta temporária do Claude; não contorne essa trava com `rm`.
 
 ### 5. Headline
 
