@@ -22,20 +22,28 @@ Nos dois: 9:16 em 1080x1920, 30 fps, sem som, headline fixa em branco com contor
 
 ## Requisitos
 
-- Windows (o gerador escreve na pasta de rascunhos do CapCut desktop e a limpeza usa a Lixeira do Windows) — para macOS, veja [Mac: ainda não](#mac-ainda-não)
+- Windows, ou macOS ([ainda não verificado num Mac](#macos-escrito-mas-não-testado))
 - CapCut desktop
 - `node` 18+
 - `ffmpeg` e `ffprobe` no PATH
+- No macOS, `lsof` e `pgrep` (vêm com o sistema) para o gerador saber se o CapCut está com o projeto aberto
 
-## Mac: ainda não
+## macOS: escrito, mas não testado
 
-Hoje isto roda só no Windows. Adaptar para macOS está na lista; são três coisas, em ordem de importância:
+O código dos dois sistemas está aqui, mas **o lado macOS foi escrito numa máquina Windows e nunca rodou num Mac**. Funciona no papel; trate a primeira sessão num Mac como teste. O que muda entre os sistemas:
 
-1. **`lixeira.mjs` não funciona.** A limpeza chama o PowerShell e o `Microsoft.VisualBasic.FileIO.FileSystem` para mandar à Lixeira. No Mac seria `osascript` pedindo ao Finder para mover para o Lixo (ou a CLI `trash`). Enquanto não for adaptado, no Mac o script falha em vez de apagar — que é o lado seguro para falhar.
-2. **A detecção de "projeto aberto no CapCut" fica muda.** O `capcut-draft.mjs` descobre que o projeto está aberto tentando renomear um clipe em uso: no Windows o arquivo está travado e o rename falha, o que dispara o aborto. O macOS deixa renomear arquivo aberto, então o teste passa sempre e o CapCut pode gravar a versão antiga por cima da montagem nova sem ninguém avisar. Precisa de outro sinal — `lsof` no arquivo, ou checar se o processo do CapCut está rodando.
-3. **O caminho dos rascunhos.** O padrão é `~/AppData/Local/CapCut/User Data`. No Mac deve ser `~/Movies/CapCut/User Data`, mas isso vem de blogs e não da documentação da CapCut: confirme em Configurações do CapCut, ou no painel Detalhes de um projeto aberto, antes de confiar. Esta é a parte fácil — o plano já aceita `"capcutUserData"` ou `"draftsRoot"`, então dá para apontar sem mexer no código.
+- **Lixeira.** No Windows, PowerShell e `Microsoft.VisualBasic.FileIO.FileSystem`. No macOS, `osascript` pedindo ao Finder para mover para o Lixo — vai para o Lixo de verdade e dá para restaurar (a CLI `trash` não vem instalada, por isso o Finder). Na primeira vez o macOS pede permissão para o terminal controlar o Finder; sem ela a limpeza falha e devolve `ok: false`, sem apagar nada. A trava que recusa qualquer caminho fora de `$TIKTOK_SHOP_WORKDIR` e da pasta temporária do Claude vale igual nos dois.
+- **"Projeto aberto no CapCut".** No Windows, o arquivo aberto fica travado, então renomear um clipe do projeto atual falha e o gerador aborta. No macOS renomear arquivo em uso funciona, e essa checagem passaria sempre: lá o sinal é o `lsof` em cada clipe do projeto. E se o `lsof` não acusar nada mas o processo do CapCut estiver rodando, o gerador para e pede confirmação de que o CapCut está na tela inicial, porque daqui não há como saber — `--forcar` passa por cima. Com o CapCut fechado, gera sem perguntar.
+- **Pasta dos rascunhos.** `~/AppData/Local/CapCut/User Data` no Windows, `~/Movies/CapCut/User Data` no macOS. O caminho do Mac vem de blogs, não da documentação da CapCut, então quando a pasta não existe o gerador para e diz onde ver o caminho certo (Configurações do CapCut, ou o painel Detalhes de um projeto aberto); o plano aceita `"capcutUserData"` e `"draftsRoot"` para apontar à mão. Em outro sistema operacional ele pede um desses dois.
+- **Fonte do carimbo das folhas de contato.** A Arial do Windows, ou `/System/Library/Fonts/Supplemental/Arial.ttf` no macOS. Se o arquivo não existir, o script avisa e as folhas saem com a fonte que o ffmpeg escolher.
 
-A fonte do carimbo das folhas de contato já é configurável: `ANALISAR_FONT=/System/Library/Fonts/Supplemental/Arial.ttf`.
+### Para conferir no primeiro Mac
+
+1. **O `lsof` acusa mesmo o CapCut?** Abra o projeto "TikTok Shop" no CapCut e rode o gerador: tem de abortar com "PROJETO ABERTO NO CAPCUT". Se ele abortar com "CAPCUT ABERTO" (o aviso genérico), o `lsof` não vê os clipes — aí o único sinal é o processo, e vale fechar o CapCut antes de gerar.
+2. **A Lixeira.** Rode `node scripts/lixeira.mjs` numa pasta de teste dentro de `$TIKTOK_SHOP_WORKDIR` e confirme que ela aparece no Lixo e que dá para restaurar. Teste também um caminho de fora (tem de recusar) e um com acento no nome (o caminho vai para o `osascript` por variável de ambiente).
+3. **A pasta dos rascunhos.** Confirme `~/Movies/CapCut/User Data` e que o projeto gerado aparece no CapCut; se não, pegue o caminho nas Configurações do CapCut e passe `"capcutUserData"` no plano.
+4. **A headline.** O molde aponta para o cache de fontes de uma instalação Windows do CapCut. Num Mac esse caminho não existe, então a headline deve cair numa fonte padrão — conserto no fim da seção [O molde](#o-molde).
+5. **As folhas de contato.** Veja se o número do frame aparece carimbado em `cN.jpg`; se não, aponte `ANALISAR_FONT` para um `.ttf` que exista.
 
 ## Instalar
 
@@ -55,7 +63,7 @@ Uma variável, opcional:
 | Variável | Para quê | Padrão |
 |---|---|---|
 | `TIKTOK_SHOP_WORKDIR` | Pasta de trabalho: para onde os clipes usados são copiados, onde ficam as folhas de conferência, e o único lugar de onde a limpeza aceita apagar | `<home>/tiktok-shop` |
-| `ANALISAR_FONT` | Fonte do carimbo de número de frame nas folhas de contato | Arial do Windows |
+| `ANALISAR_FONT` | Fonte do carimbo de número de frame nas folhas de contato | Arial do sistema (Windows ou macOS) |
 
 A **pasta de entrada** (de onde vêm os clipes) não é configurada: é a que você indicar na conversa.
 
@@ -113,7 +121,7 @@ Duas consequências:
 
 - **Feche o projeto no CapCut antes de gerar.** Com o projeto aberto, o CapCut mantém a versão antiga em memória e grava por cima. O script detecta isso e aborta sem alterar nada.
 - **Um projeto só.** Todas as sequências vão para o mesmo projeto, chamado "TikTok Shop", substituindo o conteúdo anterior. Exporte antes de pedir a próxima. O script só substitui projetos que ele mesmo criou (marcados com `gerado_por_claude.txt`) e se recusa a tocar em qualquer outro.
-- **Nada é apagado de forma definitiva.** A limpeza manda para a Lixeira do Windows e só aceita caminhos dentro da pasta de trabalho.
+- **Nada é apagado de forma definitiva.** A limpeza manda para a Lixeira do Windows ou para o Lixo do macOS, e só aceita caminhos dentro da pasta de trabalho.
 
 ## Licença
 
@@ -121,4 +129,4 @@ MIT. Veja [LICENSE](LICENSE).
 
 ---
 
-**In English:** a Claude Code skill that turns AI-generated clothing clips into a TikTok Shop product video, delivered as an editable CapCut desktop project rather than a rendered MP4. It contact-sheets every clip frame by frame to cut the shots where the AI changed the product (print, colour, stripe count, logo, phantom drawstrings), assembles one of two vertical formats, and writes the CapCut draft with the headline already in place. Windows only; needs CapCut desktop, Node 18+, ffmpeg. The skill's own instructions are in Portuguese.
+**In English:** a Claude Code skill that turns AI-generated clothing clips into a TikTok Shop product video, delivered as an editable CapCut desktop project rather than a rendered MP4. It contact-sheets every clip frame by frame to cut the shots where the AI changed the product (print, colour, stripe count, logo, phantom drawstrings), assembles one of two vertical formats, and writes the CapCut draft with the headline already in place. Needs CapCut desktop, Node 18+, ffmpeg. Tested on Windows; the macOS paths are written but have never been run on a Mac. The skill's own instructions are in Portuguese.
