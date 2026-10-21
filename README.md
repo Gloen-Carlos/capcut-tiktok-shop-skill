@@ -22,10 +22,20 @@ Nos dois: 9:16 em 1080x1920, 30 fps, sem som, headline fixa em branco com contor
 
 ## Requisitos
 
-- Windows (o gerador escreve na pasta de rascunhos do CapCut desktop e a limpeza usa a Lixeira do Windows)
+- Windows (o gerador escreve na pasta de rascunhos do CapCut desktop e a limpeza usa a Lixeira do Windows) — para macOS, veja [Mac: ainda não](#mac-ainda-não)
 - CapCut desktop
 - `node` 18+
 - `ffmpeg` e `ffprobe` no PATH
+
+## Mac: ainda não
+
+Hoje isto roda só no Windows. Adaptar para macOS está na lista; são três coisas, em ordem de importância:
+
+1. **`lixeira.mjs` não funciona.** A limpeza chama o PowerShell e o `Microsoft.VisualBasic.FileIO.FileSystem` para mandar à Lixeira. No Mac seria `osascript` pedindo ao Finder para mover para o Lixo (ou a CLI `trash`). Enquanto não for adaptado, no Mac o script falha em vez de apagar — que é o lado seguro para falhar.
+2. **A detecção de "projeto aberto no CapCut" fica muda.** O `capcut-draft.mjs` descobre que o projeto está aberto tentando renomear um clipe em uso: no Windows o arquivo está travado e o rename falha, o que dispara o aborto. O macOS deixa renomear arquivo aberto, então o teste passa sempre e o CapCut pode gravar a versão antiga por cima da montagem nova sem ninguém avisar. Precisa de outro sinal — `lsof` no arquivo, ou checar se o processo do CapCut está rodando.
+3. **O caminho dos rascunhos.** O padrão é `~/AppData/Local/CapCut/User Data`. No Mac deve ser `~/Movies/CapCut/User Data`, mas isso vem de blogs e não da documentação da CapCut: confirme em Configurações do CapCut, ou no painel Detalhes de um projeto aberto, antes de confiar. Esta é a parte fácil — o plano já aceita `"capcutUserData"` ou `"draftsRoot"`, então dá para apontar sem mexer no código.
+
+A fonte do carimbo das folhas de contato já é configurável: `ANALISAR_FONT=/System/Library/Fonts/Supplemental/Arial.ttf`.
 
 ## Instalar
 

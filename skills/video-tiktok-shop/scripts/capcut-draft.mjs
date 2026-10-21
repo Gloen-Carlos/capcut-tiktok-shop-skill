@@ -23,6 +23,12 @@
 // Ao gerar uma sequência nova, manda para a Lixeira a pasta de clipes da sequência anterior.
 // Não altera projetos de outra origem nem o índice do CapCut.
 // O projeto precisa estar fechado no CapCut na hora de gerar.
+//
+// SO: só Windows. O caminho padrão dos rascunhos é o do Windows (ajustável por "capcutUserData"
+// ou "draftsRoot" no plano), a limpeza chama o lixeira.mjs, que é de Windows, e a checagem de
+// "projeto aberto no CapCut" abaixo depende de o Windows travar arquivos abertos: no macOS o
+// rename de um arquivo em uso funciona, a checagem passa sempre e a montagem nova pode ser
+// gravada por cima sem aviso. Ver "Mac: ainda não" no README antes de rodar fora do Windows.
 
 import fs from "node:fs";
 import path from "node:path";

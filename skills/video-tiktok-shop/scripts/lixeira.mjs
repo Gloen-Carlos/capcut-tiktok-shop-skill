@@ -2,6 +2,9 @@
 // Manda arquivos ou pastas de trabalho para a Lixeira do Windows.
 // Uso: node lixeira.mjs <caminho> [<caminho> ...]
 //
+// SO: só Windows. Usa o PowerShell e o Microsoft.VisualBasic.FileIO.FileSystem. Em macOS
+// seria osascript pedindo ao Finder para mover para o Lixo, ou a CLI "trash"; por ora falha.
+//
 // Só aceita caminhos DENTRO das pastas de trabalho deste fluxo:
 //   $TIKTOK_SHOP_WORKDIR            cópias dos clipes, folhas de conferência, cópia do projeto anterior
 //                                   (padrão: <home>/tiktok-shop)

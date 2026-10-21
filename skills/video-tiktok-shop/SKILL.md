@@ -21,6 +21,8 @@ Esta skill grava em duas pastas:
 
 Precisa de `ffmpeg`, `ffprobe` e `node` no PATH, e do CapCut desktop instalado.
 
+**Só Windows por enquanto.** Adaptar para macOS está pendente, e o pendente não é só trocar caminhos: a limpeza usa o PowerShell, e a trava que impede o CapCut de gravar por cima da montagem depende de o Windows travar arquivos abertos — no Mac ela passa sempre e a montagem nova pode ser perdida sem aviso. Se o usuário estiver num Mac, diga isso antes de montar nada, em vez de tentar e falhar no meio. O README do repositório tem a lista do que falta.
+
 ## Fluxo de uma sessão
 
 ### 1. Receber a pasta e separar por produto
