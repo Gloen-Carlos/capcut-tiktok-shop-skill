@@ -15,6 +15,9 @@
 // "start" e "frames" são frames do arquivo de origem (na taxa do próprio arquivo);
 // "rate" é opcional (1 = normal). Os cortes são encaixados na grade de frames do projeto:
 // um clipe em velocidade normal perde no máximo um frame no fim, nunca vaza o plano vizinho.
+// Cada clipe também é conferido contra os cortes de cena do arquivo: um trecho que atravesse um
+// corte é reduzido ao maior pedaço contínuo, para não entrar pedaço de outro plano (desligue num
+// clipe com "permitirCortes": true; os ajustes saem em "ajustesDeCorte").
 // Gera também <mediaDir>/conferencia.jpg com o primeiro e o último quadro de cada clipe.
 //
 // Trabalha sempre no mesmo projeto: .../CapCut/User Data/Projects/com.lveditor.draft/<name>.
@@ -37,7 +40,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { enviarParaLixeira } from "./lixeira.mjs";
 
@@ -139,20 +142,22 @@ const correr = (cmd, args) => {
     return { ok: false, saida: "" };
   }
 };
-// Devolve { arquivo } com o clipe em uso (string vazia = nenhum), ou null quando não há lsof
-// para responder. No macOS o lsof fica em /usr/sbin, que nem sempre está no PATH do node.
+// Devolve { arquivo } com o clipe aberto pelo CapCut (string vazia = nenhum), ou null quando não
+// há lsof para responder. O "-Fc" traz o nome do processo, para um clipe aberto por outra coisa
+// (Spotlight, pré-visualização) não virar falso "projeto aberto". No macOS o lsof fica em
+// /usr/sbin, que nem sempre está no PATH do node.
 const emUsoUnix = (files) => {
   if (!files.length) return { arquivo: "" };
   for (const lsof of ["lsof", "/usr/sbin/lsof"]) {
     let respondeu = false;
     for (const file of files) {
-      const resultado = correr(lsof, ["-t", file]);
+      const resultado = correr(lsof, ["-Fc", file]);
       if (!resultado.ok) {
         respondeu = false;
         break;
       }
       respondeu = true;
-      if (resultado.saida.trim()) return { arquivo: file };
+      if (/^c.*capcut/im.test(resultado.saida)) return { arquivo: file };
     }
     if (respondeu) return { arquivo: "" };
   }
@@ -239,6 +244,31 @@ const lerMolde = (file) =>
   );
 const template = lerMolde("draft_content.json");
 const templateMeta = lerMolde("draft_meta_info.json");
+
+// A fonte da headline mora no cache de fontes do CapCut (.../User Data/Cache/effect/<id da
+// fonte>/<versão>/<arquivo>). O {{CAPCUT_USER_DATA}} acima já apontou a raiz para esta máquina,
+// mas a pasta da versão é a do computador onde o molde foi feito: se aqui o CapCut baixou a
+// fonte em outra versão, usa o mesmo arquivo na versão que existe. Se a fonte nunca foi baixada
+// nesta máquina, sai um "avisoFonte" na saída, em vez de o CapCut cair calado em outra fonte.
+let fontWarning = "";
+const localFont = (original) => {
+  const match = slash(original || "").match(/Cache\/effect\/([^/]+)\/[^/]+\/([^/]+)$/);
+  if (!match) return original;
+  if (fs.existsSync(original)) return slash(original);
+  const effectDir = path.join(capcutUserData, "Cache", "effect", match[1]);
+  try {
+    for (const version of fs.readdirSync(effectDir)) {
+      const candidate = path.join(effectDir, version, match[2]);
+      if (fs.existsSync(candidate)) return slash(candidate);
+    }
+  } catch {
+    // fonte nunca baixada neste computador
+  }
+  fontWarning =
+    "A fonte da headline (" + match[2] + ") não está no cache do CapCut deste computador. " +
+    "Se o texto aparecer com outra fonte, peça para ele escolher a fonte Classic no texto uma vez.";
+  return slash(original);
+};
 const videoTrackTpl = template.tracks.find((track) => track.type === "video");
 const textTrackTpl = template.tracks.find((track) => track.type === "text");
 const videoSegTpl = videoTrackTpl.segments[0];
@@ -313,6 +343,52 @@ for (const info of files.values()) {
   draft.materials.videos.push(material);
 }
 
+// Trava de corte limpo: nenhum clipe pode conter pedaço de outro plano.
+// Detecta os cortes de cena de cada arquivo e, se o trecho pedido atravessar um corte
+// (ou encostar nele com 1 frame de folga), fica só com o maior pedaço contínuo,
+// tirando 1 frame de margem do lado do corte. Assim não sobra "cena de 1 s nada a ver"
+// na transição. Desligue num clipe específico com "permitirCortes": true.
+const cutCache = new Map();
+function sceneCuts(file) {
+  if (cutCache.has(file)) return cutCache.get(file);
+  const info = files.get(file);
+  // O showinfo escreve no stderr e o ffmpeg sai com 0, então é spawnSync: o execFileSync
+  // devolveria só o stdout (vazio) e a trava ficaria sem nenhum corte para olhar.
+  // Sem ffmpeg para responder, a lista fica vazia e a trava não mexe em nada.
+  const saida = spawnSync("ffmpeg", [
+    "-hide_banner", "-i", file, "-vf", "select='gt(scene,0.10)',showinfo", "-an", "-f", "null", "-",
+  ], { encoding: "utf8" });
+  const out = String(saida.stderr || "");
+  const cuts = [...out.matchAll(/pts_time:([0-9.]+)/g)].map((m) => Math.round(Number(m[1]) * info.fps));
+  cutCache.set(file, cuts);
+  return cuts;
+}
+const ajustesDeCorte = [];
+for (const clip of plan.clips) {
+  if (clip.permitirCortes) continue;
+  const s = clip.start;
+  const e = clip.start + clip.frames; // exclusivo
+  const inside = sceneCuts(clip.file).filter((c) => c > s && c < e + 1).sort((a, b) => a - b);
+  if (!inside.length) continue;
+  // pedaços contínuos entre os cortes, com 1 frame de margem do lado de cada corte
+  const bounds = [s, ...inside, e];
+  let best = null;
+  for (let i = 0; i + 1 < bounds.length; i++) {
+    const a = i === 0 ? bounds[i] : bounds[i] + 1;
+    const b = i + 1 === bounds.length - 1 ? Math.min(bounds[i + 1], e) : bounds[i + 1] - 1;
+    if (b - a > 0 && (!best || b - a > best[1] - best[0])) best = [a, b];
+  }
+  if (!best || (best[0] === s && best[1] - best[0] === clip.frames)) continue;
+  ajustesDeCorte.push({
+    arquivo: path.basename(clip.file),
+    pedido: [s, clip.frames],
+    cortesNoTrecho: inside,
+    ficou: [best[0], best[1] - best[0]],
+  });
+  clip.start = best[0];
+  clip.frames = best[1] - best[0];
+}
+
 const videoSegments = [];
 let cursor = 0; // em frames da timeline
 for (const clip of plan.clips) {
@@ -374,9 +450,16 @@ if (plan.text) {
 
   const textMaterial = clone(textMatTpl);
   textMaterial.id = uuid();
+  textMaterial.font_path = localFont(textMaterial.font_path);
+  for (const font of textMaterial.fonts || []) font.path = localFont(font.path);
   const content = JSON.parse(textMatTpl.content);
   content.text = plan.text;
   content.styles = [Object.assign({}, content.styles[0], { range: [0, plan.text.length] })];
+  if (content.styles[0].font) {
+    content.styles[0].font = Object.assign({}, content.styles[0].font, {
+      path: localFont(content.styles[0].font.path),
+    });
+  }
   textMaterial.content = JSON.stringify(content);
   draft.materials.texts.push(textMaterial);
 
@@ -402,6 +485,25 @@ for (const dir of [outDir, timelineDir]) {
   for (const copy of ["draft_content.json.bak", "template-2.tmp"]) {
     if (fs.existsSync(path.join(dir, copy))) fs.writeFileSync(path.join(dir, copy), draftJson);
   }
+}
+// Mídias das sequências anteriores ("Mídia perdida" em vermelho na biblioteca do projeto).
+// O CapCut guarda uma base antiga em attachment/patch/mini_draft.json e uma lista de mídias em
+// draft_agency_config.json; com a sequência nova elas reaparecem como mídia perdida. A base antiga
+// vai para mini_draft.json.old (sobrescrita a cada geração) e a lista fica só com os clipes atuais.
+for (const tlDir of fs.existsSync(path.join(outDir, "Timelines")) ? fs.readdirSync(path.join(outDir, "Timelines")) : []) {
+  const patchDir = path.join(outDir, "Timelines", tlDir, "attachment", "patch");
+  const mini = path.join(patchDir, "mini_draft.json");
+  if (fs.existsSync(mini)) fs.renameSync(mini, mini + ".old");
+  if (fs.existsSync(path.join(patchDir, "patch.json"))) fs.writeFileSync(path.join(patchDir, "patch.json"), JSON.stringify({ patch_data: [] }));
+}
+const agencyPath = path.join(outDir, "draft_agency_config.json");
+if (fs.existsSync(agencyPath)) {
+  try {
+    const agency = JSON.parse(fs.readFileSync(agencyPath, "utf8"));
+    const atuais = new Set([...files.values()].map((info) => info.path));
+    if (Array.isArray(agency.marterials)) agency.marterials = agency.marterials.filter((m) => atuais.has(m.source_path));
+    fs.writeFileSync(agencyPath, JSON.stringify(agency));
+  } catch {}
 }
 const projectJsonPath = path.join(outDir, "Timelines", "project.json");
 if (!(reuse && existingTimelineId)) fs.writeFileSync(
@@ -558,9 +660,11 @@ console.log(
       clipes: plan.clips.length,
       arquivos: files.size,
       duracaoSegundos: Number((totalUs / 1e6).toFixed(2)),
+      ajustesDeCorte,
       fps,
       conferencia: slash(checkSheet),
       limpeza: cleaned,
+      ...(fontWarning ? { avisoFonte: fontWarning } : {}),
     },
     null,
     2,

@@ -19,6 +19,8 @@ if [ -n "${ANALISAR_FONT:-}" ]; then
   FONT="$ANALISAR_FONT"
 elif [ "$(uname -s)" = "Darwin" ]; then
   FONT="/System/Library/Fonts/Supplemental/Arial.ttf"
+  [ -f "$FONT" ] || FONT="/Library/Fonts/Arial.ttf"
+  [ -f "$FONT" ] || FONT="/System/Library/Fonts/Helvetica.ttc"
 else
   FONT="C\:/Windows/Fonts/arial.ttf"
 fi

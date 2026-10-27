@@ -13,7 +13,7 @@
 // Só aceita caminhos DENTRO das pastas de trabalho deste fluxo:
 //   $TIKTOK_SHOP_WORKDIR            cópias dos clipes, folhas de conferência, cópia do projeto anterior
 //                                   (padrão: <home>/tiktok-shop)
-//   <pasta temporária>/claude       folhas de análise no scratchpad
+//   <pasta temporária>/claude...    folhas de análise no scratchpad
 // Qualquer outro caminho é recusado. Nada é apagado de forma definitiva: vai para a Lixeira,
 // e o espaço em disco só é liberado quando o usuário esvazia a Lixeira.
 
@@ -37,19 +37,27 @@ const norm = (p) => {
   return full.replace(/\/+$/, "");
 };
 
+const WORKDIR = process.env.TIKTOK_SHOP_WORKDIR || path.join(os.homedir(), "tiktok-shop");
+// Scratchpad do Claude: <pasta temporária>/claude/... no Windows; no macOS pode ser
+// <pasta temporária>/claude.../ ou /tmp/claude-<uid>/..., e o /tmp de lá é um atalho para
+// /private/tmp, que o path.resolve não desfaz — por isso as três bases.
+const TEMPS = WINDOWS ? [os.tmpdir()] : [os.tmpdir(), "/tmp", "/private/tmp"];
+const PASTA_CLAUDE = WINDOWS ? /^\/claude\/./ : /^\/claude[^/]*\/./;
+
 // Uma raiz que seja a raiz do sistema de arquivos ("/" ou "C:\") liberaria o disco inteiro, por
-// erro de digitação em $TIKTOK_SHOP_WORKDIR, por exemplo; nesse caso ela é descartada.
-const ROOTS = [
-  process.env.TIKTOK_SHOP_WORKDIR || path.join(os.homedir(), "tiktok-shop"),
-  path.join(os.tmpdir(), "claude"),
-].filter((root) => {
+// erro de digitação em $TIKTOK_SHOP_WORKDIR, por exemplo; nesse caso ela não vale como raiz.
+const raizValida = (root) => {
   const full = norm(root);
-  return full && full !== norm(path.parse(path.resolve(root)).root);
-});
+  return Boolean(full) && full !== norm(path.parse(path.resolve(root)).root);
+};
 
 export function permitido(target) {
   const full = norm(target);
-  return ROOTS.some((root) => full.startsWith(norm(root) + "/"));
+  if (raizValida(WORKDIR) && full.startsWith(norm(WORKDIR) + "/")) return true;
+  return TEMPS.some((temp) => {
+    const base = norm(temp);
+    return raizValida(temp) && full.startsWith(base + "/") && PASTA_CLAUDE.test(full.slice(base.length));
+  });
 }
 
 // O alvo vai pelo ambiente, não embutido no script, para o caminho não virar código.
