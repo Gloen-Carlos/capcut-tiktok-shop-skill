@@ -7,14 +7,29 @@
 #   visao-geral.jpg  uma linha por clipe (1 quadro por segundo), para agrupar por produto
 #   cN.jpg           folha do clipe N, um quadro a cada 6 frames, com o número do frame
 #
-# Precisa de ffmpeg e ffprobe no PATH. A fonte do carimbo é a Arial do Windows; em outro sistema,
-# aponte $ANALISAR_FONT para um .ttf (escape o ":" do caminho, como o ffmpeg exige).
+# Precisa de ffmpeg e ffprobe no PATH. A fonte do carimbo é a Arial do sistema: a do Windows, ou
+# a do macOS quando roda no macOS. Para usar outra, aponte $ANALISAR_FONT para um .ttf; num
+# caminho com ":" (Windows), escape o ":" como o ffmpeg exige — num caminho unix não precisa.
 
 set -u
 IN="${1:?informe a pasta dos clipes}"
 OUT="${2:?informe a pasta de saida}"
 mkdir -p "$OUT"
-FONT="${ANALISAR_FONT:-C\:/Windows/Fonts/arial.ttf}"
+if [ -n "${ANALISAR_FONT:-}" ]; then
+  FONT="$ANALISAR_FONT"
+elif [ "$(uname -s)" = "Darwin" ]; then
+  FONT="/System/Library/Fonts/Supplemental/Arial.ttf"
+  [ -f "$FONT" ] || FONT="/Library/Fonts/Arial.ttf"
+  [ -f "$FONT" ] || FONT="/System/Library/Fonts/Helvetica.ttc"
+else
+  FONT="C\:/Windows/Fonts/arial.ttf"
+fi
+# Sem a fonte o ffmpeg cai em outra e o carimbo sai diferente do esperado, sem reclamar; o aviso
+# é para não descobrir isso olhando as folhas. O teste tira a barra invertida que o ffmpeg exige
+# antes do ":" para olhar o caminho de verdade.
+if [ ! -f "$(printf '%s' "$FONT" | sed 's/\\:/:/g')" ]; then
+  echo "Aviso: fonte não encontrada ($FONT). Aponte \$ANALISAR_FONT para um .ttf." >&2
+fi
 LABEL="fontsize=24:fontcolor=yellow:box=1:boxcolor=black@0.7:x=6:y=6"
 
 rows=()
