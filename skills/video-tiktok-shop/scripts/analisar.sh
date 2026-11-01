@@ -7,14 +7,20 @@
 #   visao-geral.jpg  uma linha por clipe (1 quadro por segundo), para agrupar por produto
 #   cN.jpg           folha do clipe N, um quadro a cada 6 frames, com o número do frame
 #
-# Precisa de ffmpeg e ffprobe no PATH. A fonte do carimbo é a Arial do Windows; em outro sistema,
-# aponte $ANALISAR_FONT para um .ttf (escape o ":" do caminho, como o ffmpeg exige).
+# Precisa de ffmpeg e ffprobe no PATH. A fonte do carimbo é a Arial do sistema (Windows ou macOS);
+# em outro sistema, aponte $ANALISAR_FONT para um .ttf (escape o ":" do caminho, como o ffmpeg exige).
 
 set -u
 IN="${1:?informe a pasta dos clipes}"
 OUT="${2:?informe a pasta de saida}"
 mkdir -p "$OUT"
-FONT="${ANALISAR_FONT:-C\:/Windows/Fonts/arial.ttf}"
+if [ -n "${ANALISAR_FONT:-}" ]; then
+  FONT="$ANALISAR_FONT"
+elif [ "$(uname -s)" = "Darwin" ]; then
+  FONT="/System/Library/Fonts/Supplemental/Arial.ttf"
+else
+  FONT="C\:/Windows/Fonts/arial.ttf"
+fi
 LABEL="fontsize=24:fontcolor=yellow:box=1:boxcolor=black@0.7:x=6:y=6"
 
 rows=()

@@ -1,9 +1,6 @@
 #!/usr/bin/env node
-// Manda arquivos ou pastas de trabalho para a Lixeira do Windows.
+// Manda arquivos ou pastas de trabalho para a Lixeira do sistema (Windows ou macOS).
 // Uso: node lixeira.mjs <caminho> [<caminho> ...]
-//
-// SO: só Windows. Usa o PowerShell e o Microsoft.VisualBasic.FileIO.FileSystem. Em macOS
-// seria osascript pedindo ao Finder para mover para o Lixo, ou a CLI "trash"; por ora falha.
 //
 // Só aceita caminhos DENTRO das pastas de trabalho deste fluxo:
 //   $TIKTOK_SHOP_WORKDIR            cópias dos clipes, folhas de conferência, cópia do projeto anterior
@@ -29,23 +26,72 @@ export function permitido(target) {
   return ROOTS.some((root) => full.startsWith(norm(root) + "/"));
 }
 
+// Windows: VisualBasic.FileIO, que é a mesma rota do Explorer para a Lixeira.
+const COMANDOS_WINDOWS = [
+  [
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "Add-Type -AssemblyName Microsoft.VisualBasic; $p = $env:LIXEIRA_ALVO; " +
+        "if (Test-Path -LiteralPath $p -PathType Container) { " +
+        "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, 'OnlyErrorDialogs', 'SendToRecycleBin') " +
+        "} else { " +
+        "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, 'OnlyErrorDialogs', 'SendToRecycleBin') }",
+    ],
+  ],
+];
+
+// macOS: o Finder, que é a Lixeira de verdade (dá para restaurar com "Colocar de volta").
+// O caminho vai como argumento, nunca colado no texto do AppleScript.
+// Reserva: a própria API do sistema (NSFileManager), para quando a automação do Finder
+// estiver negada nas permissões de Privacidade — também manda para a Lixeira.
+const COMANDOS_MAC = [
+  [
+    "osascript",
+    [
+      "-e", "on run argv",
+      "-e", "set alvo to POSIX file (item 1 of argv) as alias",
+      "-e", "tell application \"Finder\" to delete alvo",
+      "-e", "end run",
+      "--", "LIXEIRA_ALVO",
+    ],
+  ],
+  [
+    "osascript",
+    [
+      "-l", "JavaScript",
+      "-e",
+      'ObjC.import("Foundation");' +
+        'var alvo = $.NSProcessInfo.processInfo.environment.objectForKey("LIXEIRA_ALVO").js;' +
+        "var erro = Ref();" +
+        "if (!$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError(" +
+        "$.NSURL.fileURLWithPath(alvo), null, erro)) {" +
+        "throw new Error(ObjC.unwrap(erro[0].localizedDescription)); }",
+    ],
+  ],
+];
+
 export function enviarParaLixeira(target) {
   if (!permitido(target)) return { caminho: target, ok: false, motivo: "fora das pastas de trabalho" };
   if (!fs.existsSync(target)) return { caminho: target, ok: false, motivo: "não existe" };
-  const script =
-    "Add-Type -AssemblyName Microsoft.VisualBasic; $p = $env:LIXEIRA_ALVO; " +
-    "if (Test-Path -LiteralPath $p -PathType Container) { " +
-    "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, 'OnlyErrorDialogs', 'SendToRecycleBin') " +
-    "} else { " +
-    "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, 'OnlyErrorDialogs', 'SendToRecycleBin') }";
-  try {
-    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-      env: { ...process.env, LIXEIRA_ALVO: path.resolve(target) },
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-  } catch (error) {
-    return { caminho: target, ok: false, motivo: String(error.stderr || error.message).trim().slice(0, 200) };
+  const comandos = process.platform === "darwin" ? COMANDOS_MAC : COMANDOS_WINDOWS;
+  const alvo = path.resolve(target);
+  let erro = "";
+  for (const [programa, argumentos] of comandos) {
+    try {
+      execFileSync(programa, argumentos.map((a) => (a === "LIXEIRA_ALVO" ? alvo : a)), {
+        env: { ...process.env, LIXEIRA_ALVO: alvo },
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      erro = "";
+      break;
+    } catch (error) {
+      erro = String(error.stderr || error.message).trim().slice(0, 200);
+    }
   }
+  if (erro) return { caminho: target, ok: false, motivo: erro };
   return { caminho: target, ok: !fs.existsSync(target), motivo: fs.existsSync(target) ? "continua no lugar" : "" };
 }
 

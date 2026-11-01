@@ -21,7 +21,16 @@ Esta skill grava em duas pastas:
 
 Precisa de `ffmpeg`, `ffprobe` e `node` no PATH, e do CapCut desktop instalado.
 
-**Só Windows por enquanto.** Adaptar para macOS está pendente, e o pendente não é só trocar caminhos: a limpeza usa o PowerShell, e a trava que impede o CapCut de gravar por cima da montagem depende de o Windows travar arquivos abertos — no Mac ela passa sempre e a montagem nova pode ser perdida sem aviso. Se o usuário estiver num Mac, diga isso antes de montar nada, em vez de tentar e falhar no meio. O README do repositório tem a lista do que falta.
+**Windows e macOS.** Os scripts escolhem o caminho conforme o sistema; no mac isso já está medido
+nesta máquina e testado:
+
+- Pasta do CapCut: `~/Movies/CapCut/User Data` (no Windows, `~/AppData/Local/CapCut/User Data`).
+- O conteúdo do projeto vai para `draft_info.json`, não `draft_content.json`. Com o nome do
+  Windows o projeto aparece na lista do CapCut do mac mas não abre.
+- A limpeza usa a Lixeira do Finder, pelo `osascript`.
+- "Projeto aberto no CapCut" é detectado pelo arquivo `.locked` da pasta do projeto, que o CapCut
+  mantém aberto só enquanto o projeto está na timeline. **Não use os clipes como sinal no mac:**
+  na tela inicial o CapCut volta a abri-los para as miniaturas, e a geração abortaria à toa.
 
 ## Fluxo de uma sessão
 
@@ -141,7 +150,7 @@ Ele pediu para não encher o disco: depois que uma sequência é concluída e el
   ```
 
 - **A sequência atual fica** até a próxima geração, porque o projeto do CapCut depende dos clipes dela até ele exportar.
-- Tudo vai para a Lixeira do Windows, nada é apagado de forma definitiva. O espaço só é liberado quando ele esvazia a Lixeira; diga isso se ele perguntar por espaço em disco. O `lixeira.mjs` recusa qualquer caminho fora da pasta de trabalho (`$TIKTOK_SHOP_WORKDIR`) e da pasta temporária do Claude; não contorne essa trava com `rm`.
+- Tudo vai para a Lixeira do sistema, nada é apagado de forma definitiva. O espaço só é liberado quando ele esvazia a Lixeira; diga isso se ele perguntar por espaço em disco. O `lixeira.mjs` recusa qualquer caminho fora da pasta de trabalho (`$TIKTOK_SHOP_WORKDIR`) e da pasta temporária do Claude; não contorne essa trava com `rm`.
 
 ### 5. Headline
 

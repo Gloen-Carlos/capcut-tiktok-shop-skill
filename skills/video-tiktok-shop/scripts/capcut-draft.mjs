@@ -23,12 +23,6 @@
 // Ao gerar uma sequência nova, manda para a Lixeira a pasta de clipes da sequência anterior.
 // Não altera projetos de outra origem nem o índice do CapCut.
 // O projeto precisa estar fechado no CapCut na hora de gerar.
-//
-// SO: só Windows. O caminho padrão dos rascunhos é o do Windows (ajustável por "capcutUserData"
-// ou "draftsRoot" no plano), a limpeza chama o lixeira.mjs, que é de Windows, e a checagem de
-// "projeto aberto no CapCut" abaixo depende de o Windows travar arquivos abertos: no macOS o
-// rename de um arquivo em uso funciona, a checagem passa sempre e a montagem nova pode ser
-// gravada por cima sem aviso. Ver "Mac: ainda não" no README antes de rodar fora do Windows.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -45,9 +39,17 @@ if (!planPath) {
 }
 const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
 const fps = plan.fps || 30;
-const capcutUserData =
-  plan.capcutUserData || path.join(os.homedir(), "AppData/Local/CapCut/User Data");
+// Pasta do CapCut: muda conforme o sistema. "capcutUserData" no plano tem prioridade.
+const capcutUserDataPadrao =
+  process.platform === "darwin"
+    ? path.join(os.homedir(), "Movies/CapCut/User Data")
+    : path.join(os.homedir(), "AppData/Local/CapCut/User Data");
+const capcutUserData = plan.capcutUserData || capcutUserDataPadrao;
 const draftsRoot = plan.draftsRoot || path.join(capcutUserData, "Projects/com.lveditor.draft");
+// Arquivo de conteudo do projeto: o CapCut do Windows le "draft_content.json" e o do macOS
+// le "draft_info.json". Com o nome errado o projeto aparece na lista mas nao abre.
+// O molde que acompanha a skill guarda sempre o nome do Windows, por ser arquivo da skill.
+const CONTENT = process.platform === "darwin" ? "draft_info.json" : "draft_content.json";
 // Molde: por padrão a cópia congelada que vem com a skill (assets/molde). Um projeto vivo do
 // CapCut muda quando o usuário edita e já quebrou a geração uma vez; só use "template" de propósito.
 const skillDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -65,28 +67,70 @@ if (reuse && !fs.existsSync(marker)) {
   process.exit(1);
 }
 // Projeto aberto no CapCut: ele mantém a versão antiga na memória e grava por cima do que for
-// gerado aqui (aconteceu em 12/10). Sinal usado: algum clipe do projeto atual está em uso.
+// gerado aqui (aconteceu em 12/10). O sinal muda conforme o sistema:
+//   Windows: renomear um arquivo em uso falha, então o rename de um clipe do projeto denuncia.
+//   macOS:   renomear arquivo aberto funciona, e o rename passaria sempre. Aqui o sinal é o
+//            arquivo "<projeto>/.locked": o CapCut o cria ao carregar o projeto, mantém aberto
+//            enquanto ele está na timeline e o apaga ao voltar para a tela inicial. Medido nesta
+//            máquina. Os clipes NÃO servem de sinal: na tela inicial o CapCut volta a abri-los
+//            para montar as miniaturas, o que dava aborto com o projeto fechado.
+//            O teste é "aberto agora", não "existe": assim um .locked deixado para trás por um
+//            fechamento anormal não trava a geração para sempre.
+function emUsoWindows(clipes) {
+  for (const file of clipes) {
+    try {
+      fs.renameSync(file, file + ".chk");
+      fs.renameSync(file + ".chk", file);
+    } catch {
+      return file;
+    }
+  }
+  return "";
+}
+function emUsoMac() {
+  let saida = "";
+  try {
+    saida = execFileSync("/usr/sbin/lsof", ["-c", "CapCut", "-F", "n"], { encoding: "utf8" });
+  } catch (erro) {
+    // lsof sai com 1 quando não há nada aberto; isso não é falha.
+    saida = typeof erro.stdout === "string" ? erro.stdout : "";
+  }
+  const abertos = new Set(
+    saida.split("\n").filter((linha) => linha.startsWith("n")).map((linha) => linha.slice(1)),
+  );
+  const real = (f) => {
+    try {
+      return fs.realpathSync(f);
+    } catch {
+      return f;
+    }
+  };
+  const lock = path.join(outDir, ".locked");
+  return abertos.has(lock) || abertos.has(real(lock)) ? lock : "";
+}
 if (reuse && !process.argv.includes("--forcar")) {
   let busy = "";
-  try {
-    const current = JSON.parse(fs.readFileSync(path.join(outDir, "draft_content.json"), "utf8"));
-    for (const file of new Set(current.materials.videos.map((video) => video.path))) {
-      if (!fs.existsSync(file)) continue;
-      try {
-        fs.renameSync(file, file + ".chk");
-        fs.renameSync(file + ".chk", file);
-      } catch {
-        busy = file;
-        break;
-      }
+  if (process.platform === "darwin") {
+    // Não depende de ler o draft: o sinal está no .locked da pasta do projeto.
+    busy = emUsoMac();
+  } else {
+    try {
+      const current = JSON.parse(fs.readFileSync(path.join(outDir, CONTENT), "utf8"));
+      const clipes = [...new Set(current.materials.videos.map((video) => video.path))].filter((f) =>
+        fs.existsSync(f),
+      );
+      busy = emUsoWindows(clipes);
+    } catch {
+      busy = "";
     }
-  } catch {
-    busy = "";
   }
   if (busy) {
     console.error(
-      "PROJETO ABERTO NO CAPCUT: o clipe \"" + path.basename(busy) + "\" está em uso. " +
-        "Peça para ele voltar à tela inicial do CapCut e gere de novo. Nada foi alterado.",
+      "PROJETO ABERTO NO CAPCUT: " +
+        (path.basename(busy) === ".locked"
+          ? "o projeto \"" + plan.name + "\" está carregado."
+          : "o clipe \"" + path.basename(busy) + "\" está em uso.") +
+        " Peça para ele voltar à tela inicial do CapCut e gere de novo. Nada foi alterado.",
     );
     process.exit(2);
   }
@@ -107,7 +151,7 @@ if (reuse) {
   const backupDir = path.dirname(plan.mediaDir);
   fs.mkdirSync(backupDir, { recursive: true });
   backupPath = path.join(backupDir, "_projeto-anterior.json");
-  fs.copyFileSync(path.join(outDir, "draft_content.json"), backupPath);
+  fs.copyFileSync(path.join(outDir, CONTENT), backupPath);
 }
 
 if (!fs.existsSync(path.join(templateDir, "draft_content.json"))) {
@@ -122,12 +166,45 @@ const slash = (p) => p.replace(/\\/g, "/");
 
 // O molde congelado guarda os caminhos da instalação do CapCut como {{CAPCUT_USER_DATA}}, para
 // não levar consigo o caminho de quem o gerou. Aqui eles voltam a apontar para esta máquina.
+// As fontes do CapCut ficam em Cache/effect/<id>/<código>/<fonte>.ttf, e esse <código> muda de
+// uma instalação para outra. O molde leva o código de quem o gerou; em outra máquina (ou em outro
+// sistema) a MESMA fonte está sob outro código e o CapCut cai na fonte padrão. Aqui cada fonte é
+// procurada pelo nome dentro do mesmo pacote <id>. Só corrige o que não existe: onde o caminho do
+// molde já aponta para um arquivo de verdade, nada muda.
+const escaparRegex = (texto) => texto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const corrigirFontes = (texto) => {
+  const padrao = new RegExp(
+    escaparRegex(slash(capcutUserData)) + "/Cache/effect/[^\"\\\\]+?\\.(?:ttf|otf)",
+    "gi",
+  );
+  for (const achado of new Set(texto.match(padrao) || [])) {
+    if (fs.existsSync(achado)) continue;
+    const pacote = path.dirname(path.dirname(achado));
+    const nome = path.basename(achado);
+    let certo = "";
+    try {
+      for (const sub of fs.readdirSync(pacote)) {
+        if (fs.existsSync(path.join(pacote, sub, nome))) {
+          certo = slash(path.join(pacote, sub, nome));
+          break;
+        }
+      }
+    } catch {
+      certo = ""; // pacote ausente nesta instalação: deixa como está
+    }
+    if (certo) texto = texto.split(achado).join(certo);
+  }
+  return texto;
+};
+
 const lerMolde = (file) =>
   JSON.parse(
-    fs
-      .readFileSync(path.join(templateDir, file), "utf8")
-      .split("{{CAPCUT_USER_DATA}}")
-      .join(slash(capcutUserData)),
+    corrigirFontes(
+      fs
+        .readFileSync(path.join(templateDir, file), "utf8")
+        .split("{{CAPCUT_USER_DATA}}")
+        .join(slash(capcutUserData)),
+    ),
   );
 const template = lerMolde("draft_content.json");
 const templateMeta = lerMolde("draft_meta_info.json");
@@ -289,9 +366,9 @@ const timelineDir = path.join(outDir, "Timelines", draft.id);
 fs.mkdirSync(timelineDir, { recursive: true });
 const draftJson = JSON.stringify(draft);
 for (const dir of [outDir, timelineDir]) {
-  fs.writeFileSync(path.join(dir, "draft_content.json"), draftJson);
+  fs.writeFileSync(path.join(dir, CONTENT), draftJson);
   // Cópias que o CapCut mantém do conteúdo: atualiza as que existirem, para ele não recuperar a versão antiga.
-  for (const copy of ["draft_content.json.bak", "template-2.tmp"]) {
+  for (const copy of [CONTENT + ".bak", "template-2.tmp"]) {
     if (fs.existsSync(path.join(dir, copy))) fs.writeFileSync(path.join(dir, copy), draftJson);
   }
 }
@@ -431,7 +508,7 @@ fs.writeFileSync(
 Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 6000);
 let confirmed = false;
 try {
-  const after = JSON.parse(fs.readFileSync(path.join(outDir, "draft_content.json"), "utf8"));
+  const after = JSON.parse(fs.readFileSync(path.join(outDir, CONTENT), "utf8"));
   confirmed =
     after.tracks[0].segments.length === videoSegments.length &&
     after.tracks[0].segments[0].id === videoSegments[0].id;
