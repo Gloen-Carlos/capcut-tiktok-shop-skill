@@ -26,15 +26,6 @@
 // Ao gerar uma sequência nova, manda para a Lixeira a pasta de clipes da sequência anterior.
 // Não altera projetos de outra origem nem o índice do CapCut.
 // O projeto precisa estar fechado no CapCut na hora de gerar.
-//
-// SO: Windows e macOS. O que muda entre os dois:
-//   - caminho padrão da pasta do CapCut: AppData/Local no Windows, ~/Movies no macOS
-//     (sempre ajustável por "capcutUserData" ou "draftsRoot" no plano);
-//   - checagem de "projeto aberto no CapCut": rename do clipe em uso no Windows, lsof + processo
-//     do CapCut no macOS (ver o bloco adiante);
-//   - limpeza: o lixeira.mjs usa a Lixeira de cada sistema.
-// Em outro sistema o script para e pede "capcutUserData"/"draftsRoot" no plano.
-// O lado macOS foi escrito sem Mac para testar; ver a lista de conferência no README.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -51,42 +42,32 @@ if (!planPath) {
 }
 const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));
 const fps = plan.fps || 30;
-const WINDOWS = process.platform === "win32";
-
-// Pasta "User Data" do CapCut. O padrão do macOS (~/Movies) vem de blogs, não da documentação
-// da CapCut, então quando a pasta não existe o script para e diz onde achar o caminho certo,
-// em vez de sair tentando outros lugares ou criar um projeto que o CapCut nunca vai listar.
-const PADRAO_USER_DATA = {
-  win32: "AppData/Local/CapCut/User Data",
-  darwin: "Movies/CapCut/User Data",
-}[process.platform];
-const comoApontar =
-  'Informe no plano "capcutUserData": "<.../CapCut/User Data>" ou "draftsRoot": ' +
-  '"<.../CapCut/User Data/Projects/com.lveditor.draft>".';
+// Pasta do CapCut: muda conforme o sistema. "capcutUserData" no plano tem prioridade.
+const capcutUserDataPadrao =
+  process.platform === "darwin"
+    ? path.join(os.homedir(), "Movies/CapCut/User Data")
+    : path.join(os.homedir(), "AppData/Local/CapCut/User Data");
 // Só "draftsRoot" no plano: a pasta do CapCut é a de dois níveis acima, que é como o próprio
 // CapCut monta esse caminho. É ela que resolve o {{CAPCUT_USER_DATA}} do molde.
 const capcutUserData =
   plan.capcutUserData ||
-  (plan.draftsRoot
-    ? path.dirname(path.dirname(path.resolve(plan.draftsRoot)))
-    : PADRAO_USER_DATA
-      ? path.join(os.homedir(), PADRAO_USER_DATA)
-      : null);
-if (!capcutUserData) {
-  console.error(
-    "Sistema " + process.platform + ": não tenho caminho padrão da pasta do CapCut. " + comoApontar,
-  );
-  process.exit(1);
-}
+  (plan.draftsRoot ? path.dirname(path.dirname(path.resolve(plan.draftsRoot))) : capcutUserDataPadrao);
 const draftsRoot = plan.draftsRoot || path.join(capcutUserData, "Projects/com.lveditor.draft");
+// Sem a pasta de rascunhos, o script criaria um projeto que o CapCut nunca listaria; melhor parar
+// e dizer onde ver o caminho certo (vale para uma instalação em outro disco ou outra conta).
 if (!fs.existsSync(draftsRoot)) {
   console.error(
     "Pasta de rascunhos do CapCut não encontrada: " + draftsRoot + "\n" +
       "Onde ver o caminho certo: nas Configurações do CapCut (pasta dos rascunhos), ou no painel " +
-      "Detalhes de um projeto aberto. " + comoApontar,
+      'Detalhes de um projeto aberto. Depois informe no plano "capcutUserData": ' +
+      '"<.../CapCut/User Data>" ou "draftsRoot": "<.../Projects/com.lveditor.draft>".',
   );
   process.exit(1);
 }
+// Arquivo de conteudo do projeto: o CapCut do Windows le "draft_content.json" e o do macOS
+// le "draft_info.json". Com o nome errado o projeto aparece na lista mas nao abre.
+// O molde que acompanha a skill guarda sempre o nome do Windows, por ser arquivo da skill.
+const CONTENT = process.platform === "darwin" ? "draft_info.json" : "draft_content.json";
 // Molde: por padrão a cópia congelada que vem com a skill (assets/molde). Um projeto vivo do
 // CapCut muda quando o usuário edita e já quebrou a geração uma vez; só use "template" de propósito.
 const skillDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -104,25 +85,17 @@ if (reuse && !fs.existsSync(marker)) {
   process.exit(1);
 }
 // Projeto aberto no CapCut: ele mantém a versão antiga na memória e grava por cima do que for
-// gerado aqui (aconteceu em 12/10). O sinal muda de sistema, mas o modo de falhar é o mesmo:
-// na dúvida, parar sem alterar nada. "--forcar" passa por cima.
-//   Windows  o arquivo aberto fica travado, então renomear um clipe do projeto atual falha.
-//   macOS    renomear arquivo em uso funciona e essa checagem passaria sempre. Aqui o sinal é
-//            o lsof em cada clipe do projeto atual. Se o lsof não acusar nada mas o CapCut
-//            estiver rodando, não há como saber daqui se ele está na tela inicial ou com o
-//            projeto aberto: o script para e pede essa confirmação.
-const clipesDoProjeto = () => {
-  try {
-    const current = JSON.parse(fs.readFileSync(path.join(outDir, "draft_content.json"), "utf8"));
-    return [...new Set(current.materials.videos.map((video) => video.path))].filter(
-      (file) => file && fs.existsSync(file),
-    );
-  } catch {
-    return []; // sem conteúdo legível: nada a checar
-  }
-};
-const emUsoWindows = (files) => {
-  for (const file of files) {
+// gerado aqui (aconteceu em 12/10). O sinal muda conforme o sistema:
+//   Windows: renomear um arquivo em uso falha, então o rename de um clipe do projeto denuncia.
+//   macOS:   renomear arquivo aberto funciona, e o rename passaria sempre. Aqui o sinal é o
+//            arquivo "<projeto>/.locked": o CapCut o cria ao carregar o projeto, mantém aberto
+//            enquanto ele está na timeline e o apaga ao voltar para a tela inicial. Medido nesta
+//            máquina. Os clipes NÃO servem de sinal: na tela inicial o CapCut volta a abri-los
+//            para montar as miniaturas, o que dava aborto com o projeto fechado.
+//            O teste é "aberto agora", não "existe": assim um .locked deixado para trás por um
+//            fechamento anormal não trava a geração para sempre.
+function emUsoWindows(clipes) {
+  for (const file of clipes) {
     try {
       fs.renameSync(file, file + ".chk");
       fs.renameSync(file + ".chk", file);
@@ -131,77 +104,53 @@ const emUsoWindows = (files) => {
     }
   }
   return "";
-};
-// Roda um utilitário e devolve a saída. ok: false só quando o programa não existe — sair com
-// código diferente de zero ainda é resposta (o lsof sai 1 quando ninguém abriu o arquivo).
-const correr = (cmd, args) => {
+}
+function emUsoMac() {
+  let saida = "";
   try {
-    return { ok: true, saida: execFileSync(cmd, args, { stdio: ["ignore", "pipe", "ignore"] }).toString() };
-  } catch (error) {
-    if (typeof error.status === "number") return { ok: true, saida: String(error.stdout || "") };
-    return { ok: false, saida: "" };
+    saida = execFileSync("/usr/sbin/lsof", ["-c", "CapCut", "-F", "n"], { encoding: "utf8" });
+  } catch (erro) {
+    // lsof sai com 1 quando não há nada aberto; isso não é falha.
+    saida = typeof erro.stdout === "string" ? erro.stdout : "";
   }
-};
-// Devolve { arquivo } com o clipe aberto pelo CapCut (string vazia = nenhum), ou null quando não
-// há lsof para responder. O "-Fc" traz o nome do processo, para um clipe aberto por outra coisa
-// (Spotlight, pré-visualização) não virar falso "projeto aberto". No macOS o lsof fica em
-// /usr/sbin, que nem sempre está no PATH do node.
-const emUsoUnix = (files) => {
-  if (!files.length) return { arquivo: "" };
-  for (const lsof of ["lsof", "/usr/sbin/lsof"]) {
-    let respondeu = false;
-    for (const file of files) {
-      const resultado = correr(lsof, ["-Fc", file]);
-      if (!resultado.ok) {
-        respondeu = false;
-        break;
-      }
-      respondeu = true;
-      if (/^c.*capcut/im.test(resultado.saida)) return { arquivo: file };
+  const abertos = new Set(
+    saida.split("\n").filter((linha) => linha.startsWith("n")).map((linha) => linha.slice(1)),
+  );
+  const real = (f) => {
+    try {
+      return fs.realpathSync(f);
+    } catch {
+      return f;
     }
-    if (respondeu) return { arquivo: "" };
-  }
-  return null;
-};
-// true/false, ou null quando não há pgrep para responder.
-const capcutRodando = () => {
-  for (const args of [["-i", "-x", "CapCut"], ["-i", "-f", "CapCut.app"]]) {
-    const resultado = correr("pgrep", args);
-    if (!resultado.ok) return null;
-    if (resultado.saida.trim()) return true;
-  }
-  return false;
-};
-const avisarEParar = (mensagem) => {
-  console.error(mensagem + " Nada foi alterado.");
-  process.exit(2);
-};
+  };
+  const lock = path.join(outDir, ".locked");
+  return abertos.has(lock) || abertos.has(real(lock)) ? lock : "";
+}
 if (reuse && !process.argv.includes("--forcar")) {
-  const files = clipesDoProjeto();
-  const emUso = WINDOWS ? { arquivo: emUsoWindows(files) } : emUsoUnix(files);
-  if (emUso && emUso.arquivo) {
-    avisarEParar(
-      "PROJETO ABERTO NO CAPCUT: o clipe \"" + path.basename(emUso.arquivo) + "\" está em uso. " +
-        "Peça para ele voltar à tela inicial do CapCut e gere de novo.",
-    );
+  let busy = "";
+  if (process.platform === "darwin") {
+    // Não depende de ler o draft: o sinal está no .locked da pasta do projeto.
+    busy = emUsoMac();
+  } else {
+    try {
+      const current = JSON.parse(fs.readFileSync(path.join(outDir, CONTENT), "utf8"));
+      const clipes = [...new Set(current.materials.videos.map((video) => video.path))].filter((f) =>
+        fs.existsSync(f),
+      );
+      busy = emUsoWindows(clipes);
+    } catch {
+      busy = "";
+    }
   }
-  if (!WINDOWS) {
-    const rodando = capcutRodando();
-    if (rodando === true) {
-      avisarEParar(
-        "CAPCUT ABERTO: nenhum clipe do projeto aparece em uso, mas o CapCut está rodando e daqui " +
-          "não dá para saber se o projeto está aberto. O caminho limpo é pedir para ele fechar o " +
-          "CapCut e gerar de novo; se ele preferir só voltar à tela inicial, peça essa " +
-          "confirmação e rode de novo com --forcar.",
-      );
-    }
-    if (!emUso || rodando === null) {
-      avisarEParar(
-        "SEM COMO CHECAR O CAPCUT: faltam lsof e/ou pgrep neste sistema, então não sei dizer se o " +
-          "projeto está aberto. Peça para ele confirmar que o CapCut está na tela inicial e gere " +
-          "de novo com --forcar.",
-      );
-    }
+  if (busy) {
+    console.error(
+      "PROJETO ABERTO NO CAPCUT: " +
+        (path.basename(busy) === ".locked"
+          ? "o projeto \"" + plan.name + "\" está carregado."
+          : "o clipe \"" + path.basename(busy) + "\" está em uso.") +
+        " Peça para ele voltar à tela inicial do CapCut e gere de novo. Nada foi alterado.",
+    );
+    process.exit(2);
   }
 }
 let existingMeta = null;
@@ -220,7 +169,7 @@ if (reuse) {
   const backupDir = path.dirname(plan.mediaDir);
   fs.mkdirSync(backupDir, { recursive: true });
   backupPath = path.join(backupDir, "_projeto-anterior.json");
-  fs.copyFileSync(path.join(outDir, "draft_content.json"), backupPath);
+  fs.copyFileSync(path.join(outDir, CONTENT), backupPath);
 }
 
 if (!fs.existsSync(path.join(templateDir, "draft_content.json"))) {
@@ -235,40 +184,55 @@ const slash = (p) => p.replace(/\\/g, "/");
 
 // O molde congelado guarda os caminhos da instalação do CapCut como {{CAPCUT_USER_DATA}}, para
 // não levar consigo o caminho de quem o gerou. Aqui eles voltam a apontar para esta máquina.
+// As fontes do CapCut ficam em Cache/effect/<id>/<código>/<fonte>.ttf, e esse <código> muda de
+// uma instalação para outra. O molde leva o código de quem o gerou; em outra máquina (ou em outro
+// sistema) a MESMA fonte está sob outro código e o CapCut cai na fonte padrão. Aqui cada fonte é
+// procurada pelo nome dentro do mesmo pacote <id>. Só corrige o que não existe: onde o caminho do
+// molde já aponta para um arquivo de verdade, nada muda.
+let fontWarning = "";
+const escaparRegex = (texto) => texto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const corrigirFontes = (texto) => {
+  const padrao = new RegExp(
+    escaparRegex(slash(capcutUserData)) + "/Cache/effect/[^\"\\\\]+?\\.(?:ttf|otf)",
+    "gi",
+  );
+  for (const achado of new Set(texto.match(padrao) || [])) {
+    if (fs.existsSync(achado)) continue;
+    const pacote = path.dirname(path.dirname(achado));
+    const nome = path.basename(achado);
+    let certo = "";
+    try {
+      for (const sub of fs.readdirSync(pacote)) {
+        if (fs.existsSync(path.join(pacote, sub, nome))) {
+          certo = slash(path.join(pacote, sub, nome));
+          break;
+        }
+      }
+    } catch {
+      certo = ""; // pacote ausente nesta instalação: deixa como está
+    }
+    if (certo) texto = texto.split(achado).join(certo);
+    // Nem no pacote: o CapCut desta máquina nunca baixou a fonte. Vira "avisoFonte" na saída,
+    // em vez de o CapCut cair calado em outra fonte e a headline sair diferente.
+    else
+      fontWarning =
+        "A fonte da headline (" + nome + ") não está no cache do CapCut deste computador. " +
+        "Se o texto aparecer com outra fonte, peça para ele escolher a fonte Classic no texto uma vez.";
+  }
+  return texto;
+};
+
 const lerMolde = (file) =>
   JSON.parse(
-    fs
-      .readFileSync(path.join(templateDir, file), "utf8")
-      .split("{{CAPCUT_USER_DATA}}")
-      .join(slash(capcutUserData)),
+    corrigirFontes(
+      fs
+        .readFileSync(path.join(templateDir, file), "utf8")
+        .split("{{CAPCUT_USER_DATA}}")
+        .join(slash(capcutUserData)),
+    ),
   );
 const template = lerMolde("draft_content.json");
 const templateMeta = lerMolde("draft_meta_info.json");
-
-// A fonte da headline mora no cache de fontes do CapCut (.../User Data/Cache/effect/<id da
-// fonte>/<versão>/<arquivo>). O {{CAPCUT_USER_DATA}} acima já apontou a raiz para esta máquina,
-// mas a pasta da versão é a do computador onde o molde foi feito: se aqui o CapCut baixou a
-// fonte em outra versão, usa o mesmo arquivo na versão que existe. Se a fonte nunca foi baixada
-// nesta máquina, sai um "avisoFonte" na saída, em vez de o CapCut cair calado em outra fonte.
-let fontWarning = "";
-const localFont = (original) => {
-  const match = slash(original || "").match(/Cache\/effect\/([^/]+)\/[^/]+\/([^/]+)$/);
-  if (!match) return original;
-  if (fs.existsSync(original)) return slash(original);
-  const effectDir = path.join(capcutUserData, "Cache", "effect", match[1]);
-  try {
-    for (const version of fs.readdirSync(effectDir)) {
-      const candidate = path.join(effectDir, version, match[2]);
-      if (fs.existsSync(candidate)) return slash(candidate);
-    }
-  } catch {
-    // fonte nunca baixada neste computador
-  }
-  fontWarning =
-    "A fonte da headline (" + match[2] + ") não está no cache do CapCut deste computador. " +
-    "Se o texto aparecer com outra fonte, peça para ele escolher a fonte Classic no texto uma vez.";
-  return slash(original);
-};
 const videoTrackTpl = template.tracks.find((track) => track.type === "video");
 const textTrackTpl = template.tracks.find((track) => track.type === "text");
 const videoSegTpl = videoTrackTpl.segments[0];
@@ -450,16 +414,9 @@ if (plan.text) {
 
   const textMaterial = clone(textMatTpl);
   textMaterial.id = uuid();
-  textMaterial.font_path = localFont(textMaterial.font_path);
-  for (const font of textMaterial.fonts || []) font.path = localFont(font.path);
   const content = JSON.parse(textMatTpl.content);
   content.text = plan.text;
   content.styles = [Object.assign({}, content.styles[0], { range: [0, plan.text.length] })];
-  if (content.styles[0].font) {
-    content.styles[0].font = Object.assign({}, content.styles[0].font, {
-      path: localFont(content.styles[0].font.path),
-    });
-  }
   textMaterial.content = JSON.stringify(content);
   draft.materials.texts.push(textMaterial);
 
@@ -480,9 +437,9 @@ const timelineDir = path.join(outDir, "Timelines", draft.id);
 fs.mkdirSync(timelineDir, { recursive: true });
 const draftJson = JSON.stringify(draft);
 for (const dir of [outDir, timelineDir]) {
-  fs.writeFileSync(path.join(dir, "draft_content.json"), draftJson);
+  fs.writeFileSync(path.join(dir, CONTENT), draftJson);
   // Cópias que o CapCut mantém do conteúdo: atualiza as que existirem, para ele não recuperar a versão antiga.
-  for (const copy of ["draft_content.json.bak", "template-2.tmp"]) {
+  for (const copy of [CONTENT + ".bak", "template-2.tmp"]) {
     if (fs.existsSync(path.join(dir, copy))) fs.writeFileSync(path.join(dir, copy), draftJson);
   }
 }
@@ -641,7 +598,7 @@ fs.writeFileSync(
 Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 6000);
 let confirmed = false;
 try {
-  const after = JSON.parse(fs.readFileSync(path.join(outDir, "draft_content.json"), "utf8"));
+  const after = JSON.parse(fs.readFileSync(path.join(outDir, CONTENT), "utf8"));
   confirmed =
     after.tracks[0].segments.length === videoSegments.length &&
     after.tracks[0].segments[0].id === videoSegments[0].id;

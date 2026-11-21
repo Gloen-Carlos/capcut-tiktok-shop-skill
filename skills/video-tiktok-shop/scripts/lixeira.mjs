@@ -1,13 +1,10 @@
 #!/usr/bin/env node
-// Manda arquivos ou pastas de trabalho para a Lixeira do sistema.
+// Manda arquivos ou pastas de trabalho para a Lixeira do sistema (Windows ou macOS).
 // Uso: node lixeira.mjs <caminho> [<caminho> ...]
 //
-// SO: Windows e macOS.
-//   Windows  PowerShell + Microsoft.VisualBasic.FileIO.FileSystem (Lixeira do Windows).
-//   macOS    osascript pedindo ao Finder para mover para o Lixo. Vai para o Lixo de verdade e
-//            dá para restaurar. A CLI "trash" não vem instalada, por isso o Finder.
-//            Na primeira vez o macOS pede permissão para controlar o Finder; sem ela o
-//            osascript falha (erro -1743) e o script devolve ok: false, sem apagar nada.
+//   Windows  PowerShell + Microsoft.VisualBasic.FileIO.FileSystem (a rota do Explorer).
+//   macOS    Finder pelo osascript; se a automação do Finder estiver negada nas permissões
+//            de Privacidade, cai no NSFileManager, que também manda para a Lixeira.
 // Em outro sistema o script recusa, em vez de apagar de um jeito definitivo.
 //
 // Só aceita caminhos DENTRO das pastas de trabalho deste fluxo:
@@ -60,9 +57,10 @@ export function permitido(target) {
   });
 }
 
-// O alvo vai pelo ambiente, não embutido no script, para o caminho não virar código.
-const COMANDO = {
-  windows: [
+// Windows: VisualBasic.FileIO, que é a mesma rota do Explorer para a Lixeira.
+// O alvo vai pelo ambiente ou como argumento, nunca colado no texto do script.
+const COMANDOS_WINDOWS = [
+  [
     "powershell.exe",
     [
       "-NoProfile",
@@ -75,37 +73,64 @@ const COMANDO = {
         "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, 'OnlyErrorDialogs', 'SendToRecycleBin') }",
     ],
   ],
-  // "delete" do Finder = mover para o Lixo (não é apagar). Vale para arquivo e para pasta.
-  mac: [
+];
+
+// macOS: o Finder, que é a Lixeira de verdade (dá para restaurar com "Colocar de volta").
+// O caminho vai como argumento, nunca colado no texto do AppleScript.
+// Reserva: a própria API do sistema (NSFileManager), para quando a automação do Finder
+// estiver negada nas permissões de Privacidade — também manda para a Lixeira.
+const COMANDOS_MAC = [
+  [
     "osascript",
     [
-      "-e",
-      'set alvo to POSIX file (system attribute "LIXEIRA_ALVO")',
-      "-e",
-      'tell application "Finder" to delete (alvo as alias)',
+      "-e", "on run argv",
+      "-e", "set alvo to POSIX file (item 1 of argv) as alias",
+      "-e", "tell application \"Finder\" to delete alvo",
+      "-e", "end run",
+      "--", "LIXEIRA_ALVO",
     ],
   ],
-};
+  [
+    "osascript",
+    [
+      "-l", "JavaScript",
+      "-e",
+      'ObjC.import("Foundation");' +
+        'var alvo = $.NSProcessInfo.processInfo.environment.objectForKey("LIXEIRA_ALVO").js;' +
+        "var erro = Ref();" +
+        "if (!$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError(" +
+        "$.NSURL.fileURLWithPath(alvo), null, erro)) {" +
+        "throw new Error(ObjC.unwrap(erro[0].localizedDescription)); }",
+    ],
+  ],
+];
 
 export function enviarParaLixeira(target) {
   if (!permitido(target)) return { caminho: target, ok: false, motivo: "fora das pastas de trabalho" };
   if (!fs.existsSync(target)) return { caminho: target, ok: false, motivo: "não existe" };
-  const comando = WINDOWS ? COMANDO.windows : MAC ? COMANDO.mac : null;
-  if (!comando) {
+  const comandos = WINDOWS ? COMANDOS_WINDOWS : MAC ? COMANDOS_MAC : null;
+  if (!comandos) {
     return {
       caminho: target,
       ok: false,
       motivo: "sistema " + process.platform + " sem Lixeira conhecida; apague à mão",
     };
   }
-  try {
-    execFileSync(comando[0], comando[1], {
-      env: { ...process.env, LIXEIRA_ALVO: path.resolve(target) },
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-  } catch (error) {
-    return { caminho: target, ok: false, motivo: String(error.stderr || error.message).trim().slice(0, 200) };
+  const alvo = path.resolve(target);
+  let erro = "";
+  for (const [programa, argumentos] of comandos) {
+    try {
+      execFileSync(programa, argumentos.map((a) => (a === "LIXEIRA_ALVO" ? alvo : a)), {
+        env: { ...process.env, LIXEIRA_ALVO: alvo },
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      erro = "";
+      break;
+    } catch (error) {
+      erro = String(error.stderr || error.message).trim().slice(0, 200);
+    }
   }
+  if (erro) return { caminho: target, ok: false, motivo: erro };
   return { caminho: target, ok: !fs.existsSync(target), motivo: fs.existsSync(target) ? "continua no lugar" : "" };
 }
 
