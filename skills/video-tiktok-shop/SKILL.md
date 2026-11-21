@@ -46,9 +46,39 @@ Ele imprime, por clipe, o número de frames e os frames onde há corte, e gera `
 
 Trabalhe **uma sequência por vez**: monte a primeira, entregue, e diga quais outras encontrou na pasta. Só passe para a seguinte quando ele disser "próximo". Use apenas os clipes da pasta que ele indicou.
 
+### 1b. Dar um papel a cada clipe e reconhecer o gancho
+
+O gancho varia de uma pasta para outra. Antes de escolher o formato, olhe a folha numerada de **todos** os clipes do produto e dê a cada um **um papel**: gancho, entrada (colocação), unboxing, detalhe ou saída. Decida pelo que aparece no quadro, nunca pelo nome do arquivo (os nomes são gerados por IA e enganam). Nenhum clipe do produto pode ficar sem papel ou ser ignorado sem motivo.
+
+**Estrutura em 5 etapas.** Todo vídeo segue: **1. gancho → 2. colocação → 3. detalhe 1 → 4. detalhe 2 → 5. retirada.** Sem gancho, são 4 etapas. Quando o gancho já coloca as peças (unboxing, estalo, aparição), 1 e 2 viram uma só. Leia `references/etapas-e-ganchos.md` antes de montar: ali estão os tipos de cada etapa, como reconhecer cada um e o que fazer. Nos detalhes, nunca repita a mesma ação nas etapas 3 e 4; a etapa 4 é, de preferência, "mostrar 2 peças".
+
+**Catálogo de ganchos.** O gancho é sempre o **primeiro** bloco do vídeo e existe no máximo **um** gancho de abertura por vídeo.
+
+| Tipo | Como reconhecer no quadro | O que fazer |
+|---|---|---|
+| **Esticada** | Clipe curto (~4 s), peças já arrumadas, mãos puxando a da frente | Abre o vídeo, no máximo 2,10 s com as duas puxadinhas inteiras (acelere com `rate`). Depois vem a entrada ou o unboxing |
+| **Esticada no ar** | A peça da frente erguida e esticada no ar várias vezes | Como a esticada: o par de puxadas mais forte, até 2,10 s |
+| **Pacote abrindo (unboxing)** | Começa com a superfície vazia ou quase vazia; o pacote preto do TikTok Shop entra, é aberto e as peças saem e são colocadas | **Substitui a entrada.** Use o movimento inteiro, contínuo: do primeiro quadro em que o pacote aparece até a última peça assentar (no máximo 0,3 s de superfície vazia antes). Acelere até 1,3x, não corte o meio. Se também houver esticada, a esticada vem antes (formato 3); se não houver, o unboxing abre o vídeo |
+| **Rasgando ou abrindo o pacote** | Close do pacote ou do saquinho plástico sendo rasgado ou aberto, a peça aparece de dentro | Gancho de até 2,10 s: do começo do rasgo até a peça ficar visível. Depois siga com a entrada normal (ou com o unboxing, se o clipe continuar colocando as peças) |
+| **Close de detalhe** | Macro do tecido, da estampa, do bordado ou do acabamento, sem cama vazia | Gancho de até 2,10 s com o momento mais forte. Esse trecho não pode se repetir depois nos detalhes |
+| **Estalo de dedo** | Cama vazia, mão estala, as peças aparecem de uma vez | **Substitui a entrada.** `"permitirCortes": true` |
+| **Aparição uma a uma** | Chão vazio, gesto da mão, cada peça surge de repente (cortes no meio) | **Substitui a entrada**, como o estalo. `"permitirCortes": true` |
+| **Mão cobrindo a câmera** | No fim de um gancho, a palma tampa a lente | É transição: fecha o gancho e corta direto para a colocação; não corte como "mão estranha" |
+| **Colocar e retirar** | Um clipe só em que as peças entram e saem da superfície | Não é gancho: é o clipe de entrada e saída. A entrada abre o vídeo (ou vem logo depois do gancho) e a saída fecha o vídeo |
+
+Regras que valem para todos:
+
+- **Gancho que substitui a entrada** (unboxing, estalo, aparição): não procure nem monte outra colocação com as mãos. Se a pasta tiver também um clipe de colocação comum, ele fica de fora, e você diz isso na entrega.
+- **Mais de um candidato a gancho**: prioridade esticada (na superfície ou no ar) > rasgando ou abrindo o pacote > close de detalhe. Unboxing, estalo e aparição não competem com eles, porque ocupam o lugar da entrada.
+- **Gancho que não está no catálogo**: use-o mesmo assim como primeiro bloco, até 2,10 s, com o momento de maior ação, e escreva em "Pontos para você conferir" o que viu e como usou, para ele confirmar. Depois da confirmação, acrescente a linha nova nesta tabela.
+- **Duração**: o gancho curto nunca passa de 2,10 s; unboxing, estalo e aparição seguem o movimento inteiro (acelerado), porque contam como colocação.
+- O gancho tem que ser **um trecho contínuo**. Movimento rápido de mão gera falso corte de cena: se o cenário continua o mesmo nos quadros em volta, use `"permitirCortes": true` em vez de quebrar o gancho em dois.
+- Na `conferencia.jpg`, o primeiro par de quadros tem que mostrar o gancho que você escolheu; se mostrar outra coisa, o plano está errado.
+- Na entrega, diga numa linha qual gancho você reconheceu (ex.: "Gancho: pacote abrindo, substituiu a entrada").
+
 ### 2. Identificar o formato
 
-Há dois formatos. Diga na entrega qual usou.
+Há três formatos. Diga na entrega qual usou.
 
 **Formato 1 (o mais comum).** Sinais: clipes de detalhe com closes e macros, um por cor ou peça, cada um com 5 a 8 cortes internos de cerca de 1 s; mais um clipe único de entrada e saída.
 
@@ -64,6 +94,7 @@ Há dois formatos. Diga na entrega qual usou.
 - A entrada mostra a colocação inteira e a saída vai até a cama vazia. Encurtar isso foi reclamado duas vezes. Acelere no máximo 1,3x e não corte trechos do movimento.
 - O clipe de entrada e saída quase sempre termina com as peças reaparecendo de repente na cama vazia. Pare a saída antes desse corte.
 - Se o clipe só tiver a entrada, feche com as peças juntas e avise que falta uma tomada de saída.
+- **Gancho de estalo de dedo (comum em roupa masculina).** Quando a pasta tiver um clipe com a cama vazia, uma mão estalando o dedo e as peças aparecendo de uma vez, esse clipe é o gancho E substitui a entrada: comece na cama vazia, mostre o estalo e as peças aparecendo, e vá direto para os detalhes. O estalo gera um corte de cena no meio do trecho, que é proposital: use `"permitirCortes": true` nesse clipe.
 - **Gancho de esticada, quando existir.** Se a pasta tiver um clipe curto (cerca de 4 s, sem cortes) das peças já arrumadas com as mãos esticando a da frente, abra o vídeo com cerca de 2 s dele mostrando a esticada (de preferência o trecho das duas puxadinhas, veja a regra no formato 2), como no gancho do formato 2, e só depois entre na entrada (cama vazia) e siga a edição normal. Sem esse clipe, comece direto pela entrada.
 
 **Formato 2 (kit empilhado).** Sinais: todos os clipes no mesmo plano aberto, com as peças empilhadas em leque, sem macro.
@@ -86,7 +117,21 @@ Os clipes desse formato costumam vir assim: um clipe curto (6 s) das peças já 
 - Se a pasta só tiver um clipe de detalhe para o kit, use dois trechos dele.
 - A saída pode ser acelerada até 1,3x. Se não houver clipe de saída, termine no último detalhe.
 
-O que é igual nos dois: 9:16 em 1080x1920, sem som, bugs cortados, mesma headline na mesma posição.
+O que é igual em todos: 9:16 em 1080x1920, sem som, bugs cortados, mesma headline na mesma posição.
+
+**Formato 3 (unboxing).** Sinais: tem um clipe com o pacote preto do TikTok Shop sendo aberto e as peças saindo dele.
+
+| Bloco | Duração | Conteúdo |
+|---|---|---|
+| Gancho | até 2,10 s | O clipe de esticada (ou outro gancho curto do catálogo do passo 1b) |
+| Unboxing | 5 a 7 s | O pacote sendo aberto e cada peça saindo e sendo posta, na ordem. É o corpo do vídeo |
+| Detalhes | 3 a 3,5 s por cor | As peças erguidas e esticadas, **com a mão passando por cima**, como no formato 2 |
+
+- **O gancho vem antes do unboxing**, não depois.
+- **Sem clipe de gancho curto**, o vídeo abre direto no unboxing: superfície vazia por no máximo 0,3 s, o pacote entra e é aberto.
+- **Os detalhes não podem ser curtos:** use cerca de 80 frames por detalhe (3,3 s a 1,3x) e escolha o trecho que contém a mão alisando a peça, não só a peça erguida.
+- Não há saída: o vídeo fecha no último detalhe.
+- O logo do TikTok Shop na embalagem fica à vista de propósito; não corte por causa dele.
 
 ### Corte limpo entre planos
 
@@ -95,6 +140,34 @@ Cada clipe do plano tem de começar e terminar dentro de UM plano só. Senão ap
 - Monte `start` e `frames` a partir da lista de cortes do `analisar.sh`: comece 1 frame depois do corte (`start = corte + 1`) e termine pelo menos 1 frame antes do corte seguinte. Nunca use um `start` igual ou anterior ao corte.
 - O gerador tem uma trava: detecta os cortes de cena de cada arquivo (limiar 0,10, mais sensível que a análise) e, se um trecho atravessar ou encostar num corte, fica só com o maior pedaço contínuo e tira 1 frame de margem. Ele lista tudo em `ajustesDeCorte` na saída. Se aparecer algum ajuste, confira na `conferencia.jpg` se o plano continua fazendo sentido. Para um clipe em que o corte é intencional, use `"permitirCortes": true` naquele clipe.
 - Na `conferencia.jpg`, o primeiro e o último quadro de cada clipe têm que ser do mesmo plano. Se não forem, corrija antes de entregar.
+
+### Marcar a entrada e a saída frame a frame
+
+Antes de escrever o plano, abra a folha numerada do clipe de entrada e saída e anote quatro frames:
+
+1. o último frame com a superfície ainda vazia (a entrada começa aí);
+2. o frame em que a última peça assenta (a entrada termina aí);
+3. o frame em que a **primeira** peça começa a ser puxada (a saída começa aí, não depois);
+4. o primeiro frame com a superfície vazia de novo (a saída termina aí).
+
+**A entrada e a saída são SEMPRE um trecho contínuo, nunca dois pedaços colados.** Dividir o movimento para fugir de um "corte" detectado deixa um pulo artificial, com a peça aparecendo duas vezes ou sumindo.
+
+O detector de cena marca movimento rápido de mão como corte. Antes de dividir, olhe a folha numerada: se os quadros em volta mostram o mesmo cenário e o movimento seguindo, **não é corte** — use `"permitirCortes": true` e mantenha o trecho inteiro. Divida só quando o cenário realmente muda (fundo diferente, peça que reaparece do nada). Esses clipes costumam ter uma pausa parada no meio da retirada; ela faz parte do movimento, então acelere em vez de cortar. Na `conferencia.jpg`, o primeiro quadro da entrada e o último quadro da saída têm que ser a superfície vazia.
+
+### Aproveitar mais planos
+
+- Use **6 a 8 planos por cor** no formato 1 quando o clipe de detalhe tiver material limpo. O teto é o bug de produto, não a duração.
+- No formato 2, estique os trechos de detalhe até onde o movimento continuar legível.
+- Só corte um plano quando ele mostrar bug de produto, cenário trocado, marca legível ou a peça irreconhecível. Tecido em macro, mão passando, peça esticada e etiqueta sem texto podem ficar.
+
+### Ritmo acelerado
+
+- **Gancho de esticada: no máximo 2,10 s.** Não encurte o trecho para caber: mantenha as duas puxadinhas inteiras e acelere com `rate`. A conta é `rate = frames / 24 / 2.1`; para 68 frames dá `"rate": 1.35`.
+- **Planos de detalhe acelerados, conforme o clipe:**
+  - **Clipe picotado** (um arquivo com várias cenas dentro, cortes a cada ~27 frames): `"rate": 1.1`. São os detalhes do formato 1.
+  - **Clipe contínuo** (uma tomada só, os de 10 s): `"rate": 1.3`, ou `1.2` quando o movimento já é rápido. São os detalhes do formato 2.
+  - Isso vale só para o que vem depois da colocação. A entrada e a saída continuam no máximo a 1,3x.
+- Com isso o formato 2 fica em uns 11 a 12 s e o formato 1 em uns 16 a 18 s.
 
 ### 3. Caçar os bugs de produto
 
@@ -202,6 +275,7 @@ Conferi quadros dos clipes, e vale abrir e dar play.
 É o formato [1 ou 2], com X s, em 9:16 (1080x1920), 30 fps, sem som.
 
 ## Como está a timeline
+- Gancho ([tipo do catálogo], X s): ...
 - Entrada (X s): ...
 - [Cor] (N planos): ...
 - Saída (X s): ...
