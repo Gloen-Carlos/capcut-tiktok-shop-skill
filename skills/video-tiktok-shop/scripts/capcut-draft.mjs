@@ -15,6 +15,9 @@
 // "start" e "frames" são frames do arquivo de origem (na taxa do próprio arquivo);
 // "rate" é opcional (1 = normal). Os cortes são encaixados na grade de frames do projeto:
 // um clipe em velocidade normal perde no máximo um frame no fim, nunca vaza o plano vizinho.
+// Cada clipe também é conferido contra os cortes de cena do arquivo: um trecho que atravesse um
+// corte é reduzido ao maior pedaço contínuo, para não entrar pedaço de outro plano (desligue num
+// clipe com "permitirCortes": true; os ajustes saem em "ajustesDeCorte").
 // Gera também <mediaDir>/conferencia.jpg com o primeiro e o último quadro de cada clipe.
 //
 // Trabalha sempre no mesmo projeto: .../CapCut/User Data/Projects/com.lveditor.draft/<name>.
@@ -28,7 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { enviarParaLixeira } from "./lixeira.mjs";
 
@@ -44,8 +47,23 @@ const capcutUserDataPadrao =
   process.platform === "darwin"
     ? path.join(os.homedir(), "Movies/CapCut/User Data")
     : path.join(os.homedir(), "AppData/Local/CapCut/User Data");
-const capcutUserData = plan.capcutUserData || capcutUserDataPadrao;
+// Só "draftsRoot" no plano: a pasta do CapCut é a de dois níveis acima, que é como o próprio
+// CapCut monta esse caminho. É ela que resolve o {{CAPCUT_USER_DATA}} do molde.
+const capcutUserData =
+  plan.capcutUserData ||
+  (plan.draftsRoot ? path.dirname(path.dirname(path.resolve(plan.draftsRoot))) : capcutUserDataPadrao);
 const draftsRoot = plan.draftsRoot || path.join(capcutUserData, "Projects/com.lveditor.draft");
+// Sem a pasta de rascunhos, o script criaria um projeto que o CapCut nunca listaria; melhor parar
+// e dizer onde ver o caminho certo (vale para uma instalação em outro disco ou outra conta).
+if (!fs.existsSync(draftsRoot)) {
+  console.error(
+    "Pasta de rascunhos do CapCut não encontrada: " + draftsRoot + "\n" +
+      "Onde ver o caminho certo: nas Configurações do CapCut (pasta dos rascunhos), ou no painel " +
+      'Detalhes de um projeto aberto. Depois informe no plano "capcutUserData": ' +
+      '"<.../CapCut/User Data>" ou "draftsRoot": "<.../Projects/com.lveditor.draft>".',
+  );
+  process.exit(1);
+}
 // Arquivo de conteudo do projeto: o CapCut do Windows le "draft_content.json" e o do macOS
 // le "draft_info.json". Com o nome errado o projeto aparece na lista mas nao abre.
 // O molde que acompanha a skill guarda sempre o nome do Windows, por ser arquivo da skill.
@@ -171,6 +189,7 @@ const slash = (p) => p.replace(/\\/g, "/");
 // sistema) a MESMA fonte está sob outro código e o CapCut cai na fonte padrão. Aqui cada fonte é
 // procurada pelo nome dentro do mesmo pacote <id>. Só corrige o que não existe: onde o caminho do
 // molde já aponta para um arquivo de verdade, nada muda.
+let fontWarning = "";
 const escaparRegex = (texto) => texto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const corrigirFontes = (texto) => {
   const padrao = new RegExp(
@@ -193,6 +212,12 @@ const corrigirFontes = (texto) => {
       certo = ""; // pacote ausente nesta instalação: deixa como está
     }
     if (certo) texto = texto.split(achado).join(certo);
+    // Nem no pacote: o CapCut desta máquina nunca baixou a fonte. Vira "avisoFonte" na saída,
+    // em vez de o CapCut cair calado em outra fonte e a headline sair diferente.
+    else
+      fontWarning =
+        "A fonte da headline (" + nome + ") não está no cache do CapCut deste computador. " +
+        "Se o texto aparecer com outra fonte, peça para ele escolher a fonte Classic no texto uma vez.";
   }
   return texto;
 };
@@ -280,6 +305,52 @@ for (const info of files.values()) {
   material.width = info.width;
   material.height = info.height;
   draft.materials.videos.push(material);
+}
+
+// Trava de corte limpo: nenhum clipe pode conter pedaço de outro plano.
+// Detecta os cortes de cena de cada arquivo e, se o trecho pedido atravessar um corte
+// (ou encostar nele com 1 frame de folga), fica só com o maior pedaço contínuo,
+// tirando 1 frame de margem do lado do corte. Assim não sobra "cena de 1 s nada a ver"
+// na transição. Desligue num clipe específico com "permitirCortes": true.
+const cutCache = new Map();
+function sceneCuts(file) {
+  if (cutCache.has(file)) return cutCache.get(file);
+  const info = files.get(file);
+  // O showinfo escreve no stderr e o ffmpeg sai com 0, então é spawnSync: o execFileSync
+  // devolveria só o stdout (vazio) e a trava ficaria sem nenhum corte para olhar.
+  // Sem ffmpeg para responder, a lista fica vazia e a trava não mexe em nada.
+  const saida = spawnSync("ffmpeg", [
+    "-hide_banner", "-i", file, "-vf", "select='gt(scene,0.10)',showinfo", "-an", "-f", "null", "-",
+  ], { encoding: "utf8" });
+  const out = String(saida.stderr || "");
+  const cuts = [...out.matchAll(/pts_time:([0-9.]+)/g)].map((m) => Math.round(Number(m[1]) * info.fps));
+  cutCache.set(file, cuts);
+  return cuts;
+}
+const ajustesDeCorte = [];
+for (const clip of plan.clips) {
+  if (clip.permitirCortes) continue;
+  const s = clip.start;
+  const e = clip.start + clip.frames; // exclusivo
+  const inside = sceneCuts(clip.file).filter((c) => c > s && c < e + 1).sort((a, b) => a - b);
+  if (!inside.length) continue;
+  // pedaços contínuos entre os cortes, com 1 frame de margem do lado de cada corte
+  const bounds = [s, ...inside, e];
+  let best = null;
+  for (let i = 0; i + 1 < bounds.length; i++) {
+    const a = i === 0 ? bounds[i] : bounds[i] + 1;
+    const b = i + 1 === bounds.length - 1 ? Math.min(bounds[i + 1], e) : bounds[i + 1] - 1;
+    if (b - a > 0 && (!best || b - a > best[1] - best[0])) best = [a, b];
+  }
+  if (!best || (best[0] === s && best[1] - best[0] === clip.frames)) continue;
+  ajustesDeCorte.push({
+    arquivo: path.basename(clip.file),
+    pedido: [s, clip.frames],
+    cortesNoTrecho: inside,
+    ficou: [best[0], best[1] - best[0]],
+  });
+  clip.start = best[0];
+  clip.frames = best[1] - best[0];
 }
 
 const videoSegments = [];
@@ -371,6 +442,25 @@ for (const dir of [outDir, timelineDir]) {
   for (const copy of [CONTENT + ".bak", "template-2.tmp"]) {
     if (fs.existsSync(path.join(dir, copy))) fs.writeFileSync(path.join(dir, copy), draftJson);
   }
+}
+// Mídias das sequências anteriores ("Mídia perdida" em vermelho na biblioteca do projeto).
+// O CapCut guarda uma base antiga em attachment/patch/mini_draft.json e uma lista de mídias em
+// draft_agency_config.json; com a sequência nova elas reaparecem como mídia perdida. A base antiga
+// vai para mini_draft.json.old (sobrescrita a cada geração) e a lista fica só com os clipes atuais.
+for (const tlDir of fs.existsSync(path.join(outDir, "Timelines")) ? fs.readdirSync(path.join(outDir, "Timelines")) : []) {
+  const patchDir = path.join(outDir, "Timelines", tlDir, "attachment", "patch");
+  const mini = path.join(patchDir, "mini_draft.json");
+  if (fs.existsSync(mini)) fs.renameSync(mini, mini + ".old");
+  if (fs.existsSync(path.join(patchDir, "patch.json"))) fs.writeFileSync(path.join(patchDir, "patch.json"), JSON.stringify({ patch_data: [] }));
+}
+const agencyPath = path.join(outDir, "draft_agency_config.json");
+if (fs.existsSync(agencyPath)) {
+  try {
+    const agency = JSON.parse(fs.readFileSync(agencyPath, "utf8"));
+    const atuais = new Set([...files.values()].map((info) => info.path));
+    if (Array.isArray(agency.marterials)) agency.marterials = agency.marterials.filter((m) => atuais.has(m.source_path));
+    fs.writeFileSync(agencyPath, JSON.stringify(agency));
+  } catch {}
 }
 const projectJsonPath = path.join(outDir, "Timelines", "project.json");
 if (!(reuse && existingTimelineId)) fs.writeFileSync(
@@ -527,9 +617,11 @@ console.log(
       clipes: plan.clips.length,
       arquivos: files.size,
       duracaoSegundos: Number((totalUs / 1e6).toFixed(2)),
+      ajustesDeCorte,
       fps,
       conferencia: slash(checkSheet),
       limpeza: cleaned,
+      ...(fontWarning ? { avisoFonte: fontWarning } : {}),
     },
     null,
     2,

@@ -14,7 +14,7 @@ Esta skill trata isso como a regra número um: cada clipe é aberto como folha d
 
 Dois formatos, identificados pelos próprios clipes:
 
-**Formato 1 — entrada, detalhes, saída.** Cama vazia, as mãos colocam as peças, blocos de close por cor (cerca de 1,1 s por plano), e as mãos retirando tudo até a cama ficar vazia de novo.
+**Formato 1 — entrada, detalhes, saída.** Cama vazia, as mãos colocam as peças, blocos de close por cor (cerca de 1,1 s por plano), e as mãos retirando tudo até a cama ficar vazia de novo. Quando a pasta tem um clipe das peças já arrumadas, ele abre o vídeo como gancho.
 
 **Formato 2 — kit empilhado.** Gancho com as peças já arrumadas, colocação de trás para a frente, dois trechos de detalhe em plano aberto, saída.
 
@@ -26,6 +26,7 @@ Nos dois: 9:16 em 1080x1920, 30 fps, sem som, headline fixa em branco com contor
 - CapCut desktop
 - `node` 18+
 - `ffmpeg` e `ffprobe` no PATH
+- No macOS, `lsof` (vem com o sistema) para o gerador saber se o CapCut está com o projeto aberto
 
 ## No Mac
 
@@ -73,7 +74,7 @@ Uma variável, opcional:
 | Variável | Para quê | Padrão |
 |---|---|---|
 | `TIKTOK_SHOP_WORKDIR` | Pasta de trabalho: para onde os clipes usados são copiados, onde ficam as folhas de conferência, e o único lugar de onde a limpeza aceita apagar | `<home>/tiktok-shop` |
-| `ANALISAR_FONT` | Fonte do carimbo de número de frame nas folhas de contato | Arial do sistema |
+| `ANALISAR_FONT` | Fonte do carimbo de número de frame nas folhas de contato | Arial do sistema (Windows ou macOS) |
 
 A **pasta de entrada** (de onde vêm os clipes) não é configurada: é a que você indicar na conversa.
 
@@ -118,13 +119,15 @@ node skills/video-tiktok-shop/scripts/lixeira.mjs <caminho>
 
 `start` e `frames` são frames do arquivo de origem — os números que o `analisar.sh` imprime. `rate` é aceleração (use só na entrada e na saída). O script copia os clipes para `mediaDir`, gera `mediaDir/conferencia.jpg` com o primeiro e o último quadro de cada corte, e imprime um JSON com o que fez.
 
+Antes de montar, cada trecho é conferido contra os cortes de cena do próprio arquivo: um trecho que atravesse um corte é reduzido ao maior pedaço contínuo, para não entrar um segundo de outro plano na transição. Os ajustes saem em `ajustesDeCorte`; num clipe em que o corte é intencional, use `"permitirCortes": true`.
+
 ## O molde
 
 `skills/video-tiktok-shop/assets/molde/` é um projeto do CapCut congelado, de onde saem os campos do rascunho e o estilo da headline. Os caminhos da instalação do CapCut estão gravados como `{{CAPCUT_USER_DATA}}` e são resolvidos para a sua máquina na hora de gerar.
 
 Duas consequências:
 
-- A headline sai com a fonte **Classic** do CapCut porque o molde aponta para o cache de fontes de uma instalação, e o código da pasta de cache muda de uma máquina para outra. O gerador tenta consertar sozinho: quando o caminho do molde não existe, ele procura a mesma fonte, pelo nome, dentro do mesmo pacote de efeito da sua instalação. Se a fonte não estiver lá, o CapCut cai numa fonte padrão; conserto: gere uma sequência, ajuste a headline no CapCut do jeito que você quer, e copie o conteúdo desse projeto para `assets/molde/draft_content.json`.
+- A headline sai com a fonte **Classic** do CapCut porque o molde aponta para o cache de fontes de uma instalação, e o código da pasta de cache muda de uma máquina para outra. O gerador tenta consertar sozinho: quando o caminho do molde não existe, ele procura a mesma fonte, pelo nome, dentro do mesmo pacote de efeito da sua instalação. Se a fonte não estiver lá, o campo `avisoFonte` aparece na saída e o CapCut cai numa fonte padrão; conserto: gere uma sequência, ajuste a headline no CapCut do jeito que você quer, e copie o conteúdo desse projeto para `assets/molde/draft_content.json`.
 - Se preferir outro molde, passe `"template": "<nome do projeto>"` no plano para usar um projeto vivo do CapCut. Não é recomendado: se você editar esse projeto, a geração quebra.
 
 ## Cuidados
